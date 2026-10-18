@@ -1,5 +1,6 @@
 import { defaultPolicy, simulate } from './engine.ts';
 import { inGermany, type DayModel } from './model.ts';
+import { calibratedModel, counts } from './real.ts';
 import type { Cause, Incident, Policy, SimResult } from './types.ts';
 
 /** DB-Definition: pünktlich = weniger als 6 Minuten Verspätung. */
@@ -18,10 +19,12 @@ export interface Metrics {
   causeMinutes: Record<Cause['type'], number>;
 }
 
-export function metrics(m: DayModel, r: SimResult): Metrics {
+/** `include` legt fest, welche Fahrten zählen (Standard: alle mit Daten und ohne Ausfall). */
+export function metrics(m: DayModel, r: SimResult, include: (trip: number) => boolean = (id) => counts(r.trips[id])): Metrics {
   let arrivals = 0, punctual = 0, delaySum = 0, pdm = 0;
   const causeMinutes: Metrics['causeMinutes'] = { incident: 0, knockon: 0, connection: 0, yield: 0, origin: 0, dwell: 0, ops: 0 };
   for (const t of m.trips) {
+    if (!include(t.id)) continue;
     const R = r.trips[t.id];
     let tripDelay = 0;
     for (let i = 1; i < t.stops.length; i++) {
@@ -39,6 +42,7 @@ export function metrics(m: DayModel, r: SimResult): Metrics {
   let missed = 0, stranded = 0, held = 0;
   r.connectionOutcome.forEach((o, i) => {
     const c = m.connections[i];
+    if (!include(c.feeder) || !include(c.departing)) return;
     if (o === 'missed') {
       missed++;
       stranded += c.passengers;
@@ -107,7 +111,9 @@ export interface DailyReport {
   /** Züge, die anderen am meisten Folgeverspätung eingebrockt haben. */
   spreaders: { trip: number; minutes: number; victims: number }[];
   simulations: number;
+  /** Simulationslauf, auf dem die Vorschläge beruhen (bei echten Tagen: der nachgespielte Tag). */
   baseRun: SimResult;
+  mode: 'real' | 'sim';
 }
 
 function applySuggestions(base: Policy, list: Suggestion[]): Policy {
@@ -124,18 +130,26 @@ function applySuggestions(base: Policy, list: Suggestion[]): Policy {
  * Jede Kandidatenentscheidung wird mit derselben Ausgangslage komplett neu simuliert,
  * anschließend werden die besten Entscheidungen gierig kombiniert.
  */
-export function dailyReport(m: DayModel, opts: { candidates?: number } = {}): DailyReport {
+export function dailyReport(day: DayModel, opts: { candidates?: number; observed?: SimResult } = {}): DailyReport {
+  // Echter Tag: beobachtete Verspätungen nachspielen. Gehaltene Anschlüsse stecken bereits in den Ist-Haltezeiten,
+  // deshalb wartet das Modell dort nicht zusätzlich (maxWait 0) – nur Vorschläge ändern das.
+  const observed = opts.observed;
+  const m = observed ? calibratedModel(day, observed) : day;
+  const include = observed ? (id: number) => counts(observed.trips[id]) : () => true;
   const policy = defaultPolicy();
+  if (observed) policy.maxWait = 0;
   const baseRun = simulate(m, policy);
-  const base = metrics(m, baseRun);
+  const simBase = metrics(m, baseRun, include);
+  // Ursachen kennt nur das Modell (der Feed enthält keine Gründe)
+  const base = observed ? { ...metrics(day, observed), causeMinutes: simBase.causeMinutes } : simBase;
   let simulations = 1;
   const maxCandidates = opts.candidates ?? 24;
 
   const evaluate = (s: Omit<Suggestion, 'savedPassengerMinutes' | 'punctualityDelta'>): Suggestion => {
     const r = simulate(m, applySuggestions(policy, [s as Suggestion]));
     simulations++;
-    const mm = metrics(m, r);
-    return { ...s, savedPassengerMinutes: base.passengerDelayMinutes - mm.passengerDelayMinutes, punctualityDelta: (mm.punctuality - base.punctuality) * 100 };
+    const mm = metrics(m, r, include);
+    return { ...s, savedPassengerMinutes: simBase.passengerDelayMinutes - mm.passengerDelayMinutes, punctualityDelta: (mm.punctuality - simBase.punctuality) * 100 };
   };
 
   const candidates: Omit<Suggestion, 'savedPassengerMinutes' | 'punctualityDelta'>[] = [];
@@ -207,16 +221,16 @@ export function dailyReport(m: DayModel, opts: { candidates?: number } = {}): Da
     const score = (x: Metrics) => (objective === 'passengers' ? -x.passengerDelayMinutes : x.punctual);
     const gain = (s: Suggestion) => (objective === 'passengers' ? s.savedPassengerMinutes : s.punctualityDelta);
     const applied: Suggestion[] = [];
-    let best = base;
+    let best = simBase;
     for (const s of [...evaluated].filter((x) => gain(x) > 0).sort((a, b) => gain(b) - gain(a))) {
-      const mm = metrics(m, simulate(m, applySuggestions(policy, [...applied, s])));
+      const mm = metrics(m, simulate(m, applySuggestions(policy, [...applied, s])), include);
       simulations++;
       if (score(mm) > score(best) + (objective === 'passengers' ? 1 : 0)) {
         applied.push(s);
         best = mm;
       }
     }
-    return { applied, metrics: best };
+    return { applied, metrics: observed ? shift(base, simBase, best) : best };
   };
   const plans = { passengers: plan('passengers'), punctuality: plan('punctuality') };
 
@@ -226,14 +240,32 @@ export function dailyReport(m: DayModel, opts: { candidates?: number } = {}): Da
     suggestions: evaluated,
     plans,
     incidents: incidentImpact(m, baseRun),
-    hotspots: hotspots(m, baseRun),
+    hotspots: hotspots(day, observed ?? baseRun),
     spreaders: spreaders(baseRun),
     simulations,
     baseRun,
+    mode: observed ? 'real' : 'sim',
   };
 }
 
 const HEADWAY_COST = 3;
+
+/** Echter Tag: Wirkung der Vorschläge (Differenz zweier Modellläufe) auf die beobachteten Kennzahlen übertragen. */
+function shift(observed: Metrics, simBase: Metrics, simPlan: Metrics): Metrics {
+  const d = (k: 'punctual' | 'passengerDelayMinutes' | 'missedConnections' | 'strandedPassengers' | 'heldConnections') => Math.max(0, observed[k] + simPlan[k] - simBase[k]);
+  const punctual = Math.min(observed.arrivals, d('punctual'));
+  return {
+    arrivals: observed.arrivals,
+    punctual,
+    punctuality: observed.arrivals ? punctual / observed.arrivals : 1,
+    avgDelay: Math.max(0, observed.avgDelay + simPlan.avgDelay - simBase.avgDelay),
+    passengerDelayMinutes: d('passengerDelayMinutes'),
+    missedConnections: d('missedConnections'),
+    strandedPassengers: d('strandedPassengers'),
+    heldConnections: d('heldConnections'),
+    causeMinutes: simPlan.causeMinutes,
+  };
+}
 
 function incidentImpact(m: DayModel, r: SimResult): IncidentImpact[] {
   const minutes = new Map<number, number>();
@@ -256,6 +288,7 @@ function hotspots(m: DayModel, r: SimResult): StationHotspot[] {
   const gained = new Map<number, { minutes: number; trains: number }>();
   for (const t of m.trips) {
     const R = r.trips[t.id];
+    if (!counts(R)) continue;
     for (let i = 1; i < t.stops.length; i++) {
       const before = Math.max(0, R.dep[i - 1] - t.schedDep[i - 1]);
       const after = Math.max(0, R.dep[i] - t.schedDep[i]);

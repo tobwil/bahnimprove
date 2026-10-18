@@ -1,8 +1,10 @@
 import './style.css';
 import { dailyReport, type DailyReport, type Objective } from './sim/analysis.ts';
 import { defaultPolicy, simulate } from './sim/engine.ts';
-import { ArrivalIndex, activeIncidents, trainAt, trainsAt, type TrainState } from './sim/live.ts';
+import { ArrivalIndex, activeIncidents as simIncidents, hotspotsAt, trainAt, trainsAt, type TrainState } from './sim/live.ts';
 import { buildDayModel, type DayModel } from './sim/model.ts';
+import { observedResult, type ObservedStats } from './sim/real.ts';
+import type { RealtimeDay } from './realtime/types.ts';
 import { INCIDENT_LABEL, causeText, fmtDelay, hhmm, incidentPlace, shortName, tripLabel } from './sim/text.ts';
 import type { SimResult, Timetable } from './sim/types.ts';
 import { $, delayColor, esc } from './ui/dom.ts';
@@ -18,8 +20,28 @@ interface Day {
   model: DayModel;
   result: SimResult;
   arrivals: ArrivalIndex;
+  /** Echtzeitdaten oder, wenn keine vorliegen, Simulation */
+  mode: 'real' | 'sim';
+  stats?: ObservedStats;
   report?: DailyReport;
 }
+
+/** Echtzeitdaten: in Produktion von der Netlify Function, lokal von scripts/collect-realtime.ts. */
+async function fetchRealtime(date: string): Promise<RealtimeDay | null> {
+  for (const url of [`api/realtime?date=${date}`, `data/realtime/${date}.json`]) {
+    try {
+      const r = await fetch(url, { cache: 'no-cache' });
+      if (!r.ok || !r.headers.get('content-type')?.includes('json')) continue;
+      const day = (await r.json()) as RealtimeDay;
+      if (day.trips && Object.keys(day.trips).length) return day;
+    } catch {
+      // nächste Quelle versuchen
+    }
+  }
+  return null;
+}
+
+const REALTIME_POLL = 60_000;
 
 function berlinNow(): { date: string; minutes: number } {
   const parts = Object.fromEntries(
@@ -51,19 +73,28 @@ async function main() {
   ]);
 
   const days = new Map<string, Day>();
-  const loadDay = (date: string): Day => {
+  /** Lädt Echtzeitdaten nach; true, wenn sich etwas geändert hat. */
+  const refreshRealtime = async (d: Day): Promise<boolean> => {
+    const rt = await fetchRealtime(d.date);
+    if (!rt || (d.stats && rt.feedTime <= d.stats.feedTime)) return false;
+    const { result, stats } = observedResult(d.model, rt);
+    Object.assign(d, { result, stats, mode: 'real', arrivals: new ArrivalIndex(d.model, result), report: undefined });
+    return true;
+  };
+  const loadDay = async (date: string): Promise<Day> => {
     let d = days.get(date);
     if (!d) {
       const model = buildDayModel(tt, date);
       const result = simulate(model, defaultPolicy());
-      d = { date, model, result, arrivals: new ArrivalIndex(model, result) };
+      d = { date, model, result, arrivals: new ArrivalIndex(model, result), mode: 'sim' };
       days.set(date, d);
+      await refreshRealtime(d);
     }
     return d;
   };
 
   const state = {
-    day: loadDay(serviceNow().date),
+    day: await loadDay(serviceNow().date),
     live: true,
     playing: true,
     speed: 60,
@@ -91,15 +122,16 @@ async function main() {
     mode.classList.toggle('is-replay', !state.live);
   };
 
-  const switchDay = (date: string) => {
-    state.day = loadDay(date);
+  const switchDay = async (date: string) => {
+    state.day = await loadDay(date);
     map.setModel(state.day.model);
     state.selectedTrain = state.selectedStation = undefined;
+    renderNotice();
   };
 
-  const goLive = () => {
+  const goLive = async () => {
     const now = serviceNow();
-    if (state.day.date !== now.date) switchDay(now.date);
+    if (state.day.date !== now.date) await switchDay(now.date);
     state.live = true;
     state.playing = true;
     state.time = now.minutes;
@@ -129,8 +161,8 @@ async function main() {
     toReplay();
   });
   $('day-today').addEventListener('click', goLive);
-  $('day-yesterday').addEventListener('click', () => {
-    switchDay(addDays(serviceNow().date, -1));
+  $('day-yesterday').addEventListener('click', async () => {
+    await switchDay(addDays(serviceNow().date, -1));
     state.time = 6 * 60;
     state.speed = 300;
     state.playing = true;
@@ -248,13 +280,17 @@ async function main() {
       const s = trainAt(m, r, id, state.time);
       const now = state.time;
       $('sel-title').textContent = T.line;
-      const causes = R.causes
-        .flatMap((cs, i) => cs.map((c) => ({ c, i })))
-        .filter(({ c, i }) => c.minutes >= 1 && (i === 0 ? R.dep[0] : R.arr[i]) <= now + 0.01);
+      const causes =
+        state.day.mode === 'real'
+          ? delayBuildup(id).filter((b) => b.at <= now + 0.01).map((b) => b.text)
+          : R.causes
+              .flatMap((cs, i) => cs.map((c) => ({ c, i })))
+              .filter(({ c, i }) => c.minutes >= 1 && (i === 0 ? R.dep[0] : R.arr[i]) <= now + 0.01)
+              .map(({ c }) => causeText(m, c));
       box.innerHTML = `
         <div class="sel-meta">${esc(shortName(m.stations[T.stops[0]].name))} → ${esc(shortName(m.stations[T.stops[T.stops.length - 1]].name))} · ${esc(T.operator)}</div>
-        <div class="sel-delay" style="color:${delayColor(s?.delay ?? 0)}">${s ? `${fmtDelay(s.delay)} Min` : now < R.dep[0] ? 'noch nicht abgefahren' : 'angekommen'}</div>
-        ${causes.length ? `<ul class="causes">${causes.map(({ c }) => `<li>${esc(causeText(m, c))}</li>`).join('')}</ul>` : ''}
+        <div class="sel-delay" style="color:${R.known === false ? 'var(--muted)' : delayColor(s?.delay ?? 0)}">${R.canceled ? 'fällt aus' : R.known === false ? 'keine Echtzeitdaten' : s ? `${fmtDelay(s.delay)} Min` : now < R.dep[0] ? 'noch nicht abgefahren' : 'angekommen'}</div>
+        ${causes.length ? `<ul class="causes">${causes.map((c) => `<li>${esc(c)}</li>`).join('')}</ul>` : ''}
         <ol class="stops">
           ${T.stops
             .map((st, i) => {
@@ -263,6 +299,7 @@ async function main() {
               const d = act - sched;
               const past = act <= now;
               const isNow = s && s.stop === i;
+              if (R.known === false) return `<li class="${act <= now ? 'is-past' : ''} ${isNow ? 'is-now' : ''}"><span class="dot"></span><span>${esc(shortName(m.stations[st].name))}</span><span class="t">${hhmm(sched)}</span><span class="t"></span></li>`;
               return `<li class="${past ? 'is-past' : ''} ${isNow ? 'is-now' : ''}"><span class="dot"></span><span>${esc(shortName(m.stations[st].name))}</span><span class="t">${hhmm(sched)}</span><span class="t" style="color:${delayColor(d)}">${past || isNow ? fmtDelay(d) : ''}</span></li>`;
             })
             .join('')}
@@ -294,6 +331,27 @@ async function main() {
       panel.hidden = false;
     } else panel.hidden = true;
   }
+  /** Echte Daten: wo ist die Verspätung entstanden? (Zuwachs je Abschnitt und Halt) */
+  function delayBuildup(id: number): { at: number; text: string }[] {
+    const m = state.day.model;
+    const T = m.trips[id];
+    const R = state.day.result.trips[id];
+    const name = (i: number) => shortName(m.stations[T.stops[i]].name);
+    const out: { at: number; text: string }[] = [];
+    const d0 = R.dep[0] - T.schedDep[0];
+    if (d0 >= 2) out.push({ at: R.dep[0], text: `+${Math.round(d0)} Min schon bei Abfahrt in ${name(0)}` });
+    for (let i = 0; i + 1 < T.stops.length; i++) {
+      const run = R.arr[i + 1] - T.schedArr[i + 1] - (R.dep[i] - T.schedDep[i]);
+      if (run >= 2) out.push({ at: R.arr[i + 1], text: `+${Math.round(run)} Min zwischen ${name(i)} und ${name(i + 1)}` });
+      else if (run <= -2) out.push({ at: R.arr[i + 1], text: `${Math.round(run)} Min aufgeholt bis ${name(i + 1)}` });
+      if (i + 1 < T.stops.length - 1) {
+        const dwell = R.dep[i + 1] - T.schedDep[i + 1] - (R.arr[i + 1] - T.schedArr[i + 1]);
+        if (dwell >= 2) out.push({ at: R.dep[i + 1], text: `+${Math.round(dwell)} Min beim Halt in ${name(i + 1)}` });
+      }
+    }
+    return out;
+  }
+
   $('selection').addEventListener('click', (e) => {
     const li = (e.target as HTMLElement).closest<HTMLElement>('[data-trip]');
     if (li) selectTrain(+li.dataset.trip!);
@@ -303,6 +361,8 @@ async function main() {
     renderSelection();
   });
 
+  /** Simulierte Störungen gibt es nur im Simulationsmodus. */
+  const activeIncidents = (m: DayModel, t: number) => (state.day.mode === 'real' ? [] : simIncidents(m, t));
   const severity = (k: string) => ['oberleitung', 'personen', 'notarzt', 'signal', 'weiche', 'fahrzeug', 'bau'].indexOf(k);
   function renderPanels(trains: TrainState[]) {
     const m = state.day.model;
@@ -310,13 +370,32 @@ async function main() {
     $('kpi-punct').textContent = sofar.arrivals ? `${(sofar.punctuality * 100).toFixed(1).replace('.', ',')}%` : '–';
     $('kpi-punct').style.color = sofar.arrivals ? delayColor(sofar.punctuality > 0.8 ? 0 : sofar.punctuality > 0.7 ? 10 : sofar.punctuality > 0.6 ? 20 : 40) : '';
     $('kpi-active').textContent = String(trains.length);
-    const avg = trains.length ? trains.reduce((s, t) => s + t.delay, 0) / trains.length : 0;
-    $('kpi-delay').textContent = trains.length ? `${avg.toFixed(1).replace('.', ',')}′` : '–';
-    const incs = activeIncidents(m, state.time).sort((a, b) => severity(a.kind) - severity(b.kind));
-    $('kpi-incidents').textContent = String(incs.length);
+    const knownTrains = trains.filter((t) => t.known);
+    const avg = knownTrains.length ? knownTrains.reduce((s, t) => s + t.delay, 0) / knownTrains.length : 0;
+    $('kpi-delay').textContent = knownTrains.length ? `${avg.toFixed(1).replace('.', ',')}′` : '–';
+    const real = state.day.mode === 'real';
+    $('kpi-incidents-label').textContent = real ? 'Brennpunkte' : 'Störungen';
+    $('kpi-incidents-hint').textContent = real ? 'letzte 60 Min' : 'aktiv';
+    $('incidents-title').textContent = real ? 'Brennpunkte · letzte 60 Min' : 'Störungen jetzt';
+    if (real) {
+      // Echte Daten enthalten keine Störungsmeldungen – stattdessen: wo wächst die Verspätung gerade?
+      const hs = hotspotsAt(m, state.day.result, state.time);
+      $('kpi-incidents').textContent = String(hs.length);
+      $('incidents').innerHTML = hs.length
+        ? hs
+            .slice(0, 7)
+            .map((h) => {
+              const st = m.stations[h.station];
+              return `<li data-lon="${st.lon}" data-lat="${st.lat}"><span class="badge" style="background:${delayColor(h.minutes / Math.max(1, h.trains) * 3)}">+${Math.round(h.minutes)}</span><span>${esc(shortName(st.name))} <span class="meta">${h.trains} ${h.trains === 1 ? 'Zug' : 'Züge'} haben hier Zeit verloren</span></span></li>`;
+            })
+            .join('')
+        : '<li class="empty">Gerade baut sich nirgends Verspätung auf</li>';
+    }
+    const incs = real ? [] : activeIncidents(m, state.time).sort((a, b) => severity(a.kind) - severity(b.kind));
+    if (!real) $('kpi-incidents').textContent = String(incs.length);
     const acute = incs.filter((i) => i.kind !== 'bau');
     const works = incs.filter((i) => i.kind === 'bau');
-    $('incidents').innerHTML =
+    if (!real) $('incidents').innerHTML =
       acute
         .map(
           (i) => `<li data-lon="${i.lon}" data-lat="${i.lat}"><span class="badge" style="background:${i.blocking ? '#f43f5e' : '#facc15'}">${i.blocking ? 'STOP' : '!'}</span><span>${INCIDENT_LABEL[i.kind]} <span class="meta">${esc(incidentPlace(m, i))} · bis ${hhmm(i.end)}</span></span></li>`,
@@ -328,7 +407,7 @@ async function main() {
               .map((i) => esc(incidentPlace(m, i)))
               .join(' · ')}${works.length > 4 ? ' …' : ''}</span></span></li>`
           : '') || '<li class="empty">Keine Störungen</li>';
-    const worst = [...trains].sort((a, b) => b.delay - a.delay).slice(0, 7);
+    const worst = knownTrains.sort((a, b) => b.delay - a.delay).slice(0, 7);
     $('worst').innerHTML = worst.length
       ? worst
           .map(
@@ -361,7 +440,7 @@ async function main() {
   const showReport = () => {
     const day = state.day;
     const partial = day.date === serviceNow().date;
-    $('report-body').innerHTML = renderReport(day.model, day.report!, { partial, objective });
+    $('report-body').innerHTML = renderReport(day.model, day.report!, { partial, objective, observed: day.mode === 'real' ? day.result : undefined });
   };
   $('open-report').addEventListener('click', () => {
     const day = state.day;
@@ -371,7 +450,7 @@ async function main() {
     $('report-body').innerHTML = `<div class="loading">Der Leitstand spielt alternative Entscheidungen durch …<div class="loading-bar"></div></div>`;
     // Erst rendern lassen, dann rechnen
     setTimeout(() => {
-      day.report = dailyReport(day.model);
+      day.report = dailyReport(day.model, day.mode === 'real' ? { observed: day.result } : {});
       showReport();
     }, 60);
   });
@@ -429,9 +508,27 @@ async function main() {
     requestAnimationFrame(loop);
   };
 
-  if (state.day.model.timetableDate !== state.day.date) {
-    $('notice').insertAdjacentHTML('beforeend', ` <em>Fahrplan-Stand ${fmtDate(state.day.model.timetableDate)} (gleicher Wochentag), bitte Daten aktualisieren.</em>`);
+  function renderNotice() {
+    const d = state.day;
+    const stale = d.model.timetableDate !== d.date ? ` Fahrplan-Stand ${fmtDate(d.model.timetableDate)} (gleicher Wochentag), bitte Daten aktualisieren.` : '';
+    if (d.mode === 'real' && d.stats) {
+      const st = d.stats;
+      const time = new Date(st.feedTime * 1000).toLocaleTimeString('de-DE', { timeZone: 'Europe/Berlin', hour: '2-digit', minute: '2-digit' });
+      $('notice').innerHTML = `<strong class="is-real">Echtzeitdaten</strong> Stand ${time} · ${st.known} Fahrten mit Ist-Daten${st.canceled ? ` · ${st.canceled} Ausfälle` : ''} · ${st.unknown} Fahrten ohne Meldung (grau, nach Fahrplan).${stale}`;
+    } else {
+      $('notice').innerHTML = `<strong>Simulation</strong> Für diesen Tag liegen keine Echtzeitdaten vor. Der Fahrplan ist echt, Störungen und Verspätungen sind simuliert.${stale}`;
+    }
+    $('clock-mode').dataset.source = d.mode;
   }
+  setInterval(async () => {
+    const d = state.day;
+    if (d.date !== serviceNow().date) return;
+    if (await refreshRealtime(d)) {
+      if (state.day === d) renderNotice();
+    }
+  }, REALTIME_POLL);
+
+  renderNotice();
   syncControls();
   requestAnimationFrame(loop);
 }

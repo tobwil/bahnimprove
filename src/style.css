@@ -190,6 +190,10 @@ button {
   font-weight: 400;
 }
 
+.notice strong.is-real {
+  color: var(--good);
+}
+
 /* Hauptbereich */
 .layout {
   display: grid;

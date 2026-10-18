@@ -99,8 +99,14 @@ export function simulate(m: DayModel, policy: Policy): SimResult {
     (yields.get(k) ?? yields.set(k, []).get(k)!).push({ follower: y.follower, followerStop: fi });
   }
 
+  const reserve = m.reserve ?? RESERVE;
   const q = new EventQueue();
   for (const t of trips) {
+    if (m.skip?.[t.id]) {
+      res[t.id].arr = [...t.schedArr];
+      res[t.id].dep = [...t.schedDep];
+      continue;
+    }
     res[t.id].arr[0] = t.schedArr[0];
     const origin = m.originDelay[t.id];
     if (origin > 0) res[t.id].causes[0].push({ type: 'origin', minutes: origin });
@@ -191,7 +197,7 @@ export function simulate(m: DayModel, policy: Policy): SimResult {
     // 4) Fahrt zum nächsten Halt
     const sched = T.schedArr[i + 1] - T.schedDep[i];
     const late = dep - T.schedDep[i];
-    let run = late > 0 ? Math.max(sched * (1 - RESERVE), sched - late) : sched;
+    let run = late > 0 ? Math.max(sched * (1 - reserve), sched - late) : sched;
     for (const inc of incs) {
       if (!inc.blocking && inc.extra > 0 && inc.start <= dep && dep < inc.end) {
         run += inc.extra;
@@ -224,6 +230,11 @@ export function simulate(m: DayModel, policy: Policy): SimResult {
     if (crowd > 0 && delay[id] > 5) {
       ready += crowd;
       R.causes[i + 1].push({ type: 'dwell', minutes: crowd });
+    }
+    const fixed = m.fixedDwell?.[id][i + 1] ?? 0;
+    if (fixed > 0) {
+      ready += fixed;
+      if (fixed >= 1) R.causes[i + 1].push({ type: 'dwell', minutes: fixed });
     }
     for (const inc of m.stopIncidents.get(stopKey(id, i + 1)) ?? []) {
       ready += inc.extra;

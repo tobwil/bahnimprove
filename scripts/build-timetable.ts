@@ -156,7 +156,12 @@ function main() {
     if (!list || list.length < 2) continue;
     list.sort((a, b) => a.seq - b.seq);
     // Doppelte aufeinanderfolgende Halte (Gleiswechsel im selben Bahnhof) zusammenfassen.
-    const merged = list.filter((s, i) => i === 0 || s.stop !== list[i - 1].stop);
+    const merged: typeof list = [];
+    for (const st of list) {
+      const prev = merged[merged.length - 1];
+      if (prev && prev.stop === st.stop) prev.dep = st.dep;
+      else merged.push({ ...st });
+    }
     const route = routes.get(trip.route) ?? { name: '?', agency: '' };
     const rKey = `${route.name}|${route.agency}`;
     if (!routeIndex.has(rKey)) { routeIndex.set(rKey, routeNames.length); routeNames.push(route.name); }
@@ -176,7 +181,9 @@ function main() {
       s.push(idx);
       t.push(stop.arr, stop.dep);
     }
-    outTrips.push({ route: routeIndex.get(rKey)!, operator: route.agency, days: trip.mask, stops: s, times: t });
+    const seqs = merged.map((x) => x.seq);
+    const identity = seqs.every((q, i) => q === i);
+    outTrips.push({ id: tripId, route: routeIndex.get(rKey)!, operator: route.agency, days: trip.mask, stops: s, times: t, ...(identity ? {} : { seqs }) });
   }
 
   outTrips.sort((a, b) => a.times[1] - b.times[1]);

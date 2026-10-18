@@ -37,6 +37,8 @@ export const DELAY_COLORS = [
   { max: Infinity, color: '#f43f5e', tail: '#7f1d33' },
 ];
 const TRAIN_PX = DELAY_COLORS.map((d) => ({ max: d.max, head: px(d.color), tail: px(d.tail) }));
+/** Fahrt ohne Echtzeitdaten */
+const TRAIN_UNKNOWN = { max: Infinity, head: px('#8393ad'), tail: px('#3d4e69') };
 
 const SPRITES: Record<string, { rows: string[]; colors: Record<string, number> }> = {
   block: { rows: ['..r..', '.rwr.', '.rwr.', 'rrrrr', 'rrwrr'], colors: { r: px('#f43f5e'), w: px('#ffffff') } },
@@ -325,7 +327,7 @@ export class PixelMap {
     }
 
     // Züge – pünktliche zuerst, damit verspätete obenauf liegen
-    const sorted = [...trains].sort((a, b) => a.delay - b.delay);
+    const sorted = [...trains].sort((a, b) => Number(a.known) - Number(b.known) || a.delay - b.delay);
     this.lastTrains = [];
     for (const s of sorted) {
       const T = m.trips[s.trip];
@@ -335,7 +337,7 @@ export class PixelMap {
       const x = ax + (bx - ax) * s.progress, y = ay + (by - ay) * s.progress;
       const len = Math.hypot(bx - ax, by - ay) || 1;
       const dx = (bx - ax) / len, dy = (by - ay) / len;
-      const col = TRAIN_PX.find((c) => s.delay < c.max)!;
+      const col = s.known ? TRAIN_PX.find((c) => s.delay < c.max)! : TRAIN_UNKNOWN;
       const rx = Math.round(x), ry = Math.round(y);
       if (!s.atStation) {
         this.set(buf, Math.round(x - dx * 2), Math.round(y - dy * 2), col.tail);

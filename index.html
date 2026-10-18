@@ -30,10 +30,7 @@
       <button id="open-report" class="pix-btn pix-btn--primary">Tagesbericht</button>
     </header>
 
-    <div class="notice" id="notice">
-      <strong>Fahrplan echt, Verspätungen simuliert.</strong>
-      Soll-Fahrplan aus dem offenen DB-Fernverkehrsfeed. Störungen und Verspätungen erzeugt die Simulation, bis ein Echtzeit-Zugang (DB Timetables API) angebunden ist.
-    </div>
+    <div class="notice" id="notice">Lade Fahrplan und Echtzeitdaten …</div>
 
     <main class="layout">
       <section class="map-wrap" aria-label="Karte">
@@ -44,6 +41,7 @@
           <span><i style="--c: #facc15"></i>+6</span>
           <span><i style="--c: #fb923c"></i>+16</span>
           <span><i style="--c: #f43f5e"></i>+31</span>
+          <span><i style="--c: #8393ad"></i>ohne Echtzeit</span>
         </div>
         <div class="zoom-ctl">
           <button id="zoom-in" class="pix-btn pix-btn--icon" aria-label="Hineinzoomen">+</button>
@@ -57,7 +55,7 @@
           <div class="kpi"><span class="kpi-label">Pünktlichkeit</span><span id="kpi-punct" class="kpi-value">–</span><span class="kpi-hint">Ankünfte &lt; 6 Min</span></div>
           <div class="kpi"><span class="kpi-label">Unterwegs</span><span id="kpi-active" class="kpi-value">–</span><span class="kpi-hint">Züge</span></div>
           <div class="kpi"><span class="kpi-label">Ø Verspätung</span><span id="kpi-delay" class="kpi-value">–</span><span class="kpi-hint">Züge unterwegs</span></div>
-          <div class="kpi"><span class="kpi-label">Störungen</span><span id="kpi-incidents" class="kpi-value">–</span><span class="kpi-hint">aktiv</span></div>
+          <div class="kpi"><span id="kpi-incidents-label" class="kpi-label">Störungen</span><span id="kpi-incidents" class="kpi-value">–</span><span id="kpi-incidents-hint" class="kpi-hint">aktiv</span></div>
         </div>
 
         <section class="panel" id="selection-panel" hidden>
@@ -66,7 +64,7 @@
         </section>
 
         <section class="panel">
-          <header class="panel-head"><h2>Störungen jetzt</h2></header>
+          <header class="panel-head"><h2 id="incidents-title">Störungen jetzt</h2></header>
           <ul id="incidents" class="list"></ul>
         </section>
 
@@ -87,7 +85,7 @@
       </div>
       <input id="scrub" type="range" min="180" max="1620" step="1" aria-label="Uhrzeit" />
       <button id="go-live" class="pix-btn pix-btn--live">● Live</button>
-      <p class="credits">Fahrplan: DELFI e.V. / gtfs.de (CC BY 4.0) · Karte: Natural Earth</p>
+      <p class="credits">Fahrplan &amp; Echtzeit: DELFI e.V. / gtfs.de (CC BY 4.0) · Karte: Natural Earth</p>
     </footer>
 
     <dialog id="report" class="report">

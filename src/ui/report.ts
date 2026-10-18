@@ -1,7 +1,7 @@
 import type { DailyReport, Objective, Suggestion } from '../sim/analysis.ts';
 import { MAX_MISS_PENALTY, type DayModel } from '../sim/model.ts';
 import { CAUSE_LABEL, INCIDENT_LABEL, fmtInt, fmtPct, hhmm, incidentPlace, shortName, tripLabel } from '../sim/text.ts';
-import type { Cause } from '../sim/types.ts';
+import type { Cause, SimResult } from '../sim/types.ts';
 import { esc } from './dom.ts';
 
 const GRADES = [
@@ -47,6 +47,47 @@ function suggestionText(m: DayModel, r: DailyReport, s: Suggestion): { tag: stri
   };
 }
 
+const REAL_CAUSE_LABEL: Record<Cause['type'], string> = {
+  ...CAUSE_LABEL,
+  origin: 'Schon am Startbahnhof',
+  ops: 'Unterwegs zwischen Halten',
+  dwell: 'Beim Halt',
+  knockon: 'Folgeverspätung (Modell)',
+};
+
+function incidentTable(m: DayModel, r: DailyReport): string {
+  return `<h3>Teuerste Störungen</h3>
+    <table class="table">
+      ${r.incidents
+        .filter((i) => i.directMinutes > 0)
+        .slice(0, 7)
+        .map(
+          (i) => `<tr><td>${INCIDENT_LABEL[i.incident.kind]}<br><span class="fine">${esc(incidentPlace(m, i.incident))}${i.incident.kind === 'bau' ? ' · ganztägig' : ` · ${hhmm(i.incident.start)}–${hhmm(i.incident.end)}`}</span></td><td class="num">${fmtInt(i.directMinutes)} Min<br><span class="fine">${i.trainsAffected} Züge</span></td></tr>`,
+        )
+        .join('')}
+    </table>`;
+}
+
+function worstTrains(m: DayModel, observed: SimResult): string {
+  const rows = m.trips
+    .filter((t) => observed.trips[t.id].known !== false && !observed.trips[t.id].canceled)
+    .map((t) => {
+      const R = observed.trips[t.id];
+      let worst = 0, at = 0;
+      t.stops.forEach((_, i) => {
+        const d = (i === 0 ? R.dep[0] - t.schedDep[0] : R.arr[i] - t.schedArr[i]);
+        if (d > worst) { worst = d; at = i; }
+      });
+      return { t, worst, at };
+    })
+    .sort((a, b) => b.worst - a.worst)
+    .slice(0, 7);
+  return `<h3>Größte Verspätungen</h3>
+    <table class="table">
+      ${rows.map((x) => `<tr><td>${esc(tripLabel(m, x.t.id))}<br><span class="fine">in ${esc(shortName(m.stations[x.t.stops[x.at]].name))}</span></td><td class="num">+${fmtInt(x.worst)} Min</td></tr>`).join('')}
+    </table>`;
+}
+
 function gainLabel(s: Suggestion, objective: Objective): string {
   const pp = `${s.punctualityDelta >= 0 ? '+' : ''}${s.punctualityDelta.toFixed(2).replace('.', ',')} Pp`;
   const hours = s.savedPassengerMinutes / 60;
@@ -64,7 +105,9 @@ const CAUSE_COLORS: Record<Cause['type'], string> = {
   yield: '#4ade80',
 };
 
-export function renderReport(m: DayModel, r: DailyReport, opts: { partial: boolean; objective: Objective }): string {
+export function renderReport(m: DayModel, r: DailyReport, opts: { partial: boolean; objective: Objective; observed?: SimResult }): string {
+  const real = r.mode === 'real';
+  const labels = real ? REAL_CAUSE_LABEL : CAUSE_LABEL;
   const g = gradeOf(r.base.punctuality);
   const plan = r.plans[opts.objective];
   const optimized = plan.metrics;
@@ -92,12 +135,18 @@ export function renderReport(m: DayModel, r: DailyReport, opts: { partial: boole
   });
 
   return `
-    ${opts.partial ? `<p class="fine">Hochrechnung für den laufenden Tag: Die Simulation kennt den restlichen Tag bereits. Den endgültigen Bericht gibt es ab 03:00 Uhr unter „Gestern“.</p>` : ''}
+    ${
+      opts.partial
+        ? real
+          ? `<p class="fine">Zwischenstand des laufenden Tages aus den bisher gesammelten Echtzeitmeldungen (inklusive Prognosen für Züge, die gerade unterwegs sind). Den endgültigen Bericht gibt es ab 03:00 Uhr unter „Gestern“.</p>`
+          : `<p class="fine">Hochrechnung für den laufenden Tag: Die Simulation kennt den restlichen Tag bereits. Den endgültigen Bericht gibt es ab 03:00 Uhr unter „Gestern“.</p>`
+        : ''
+    }
     <div class="grade-row">
       <div class="grade" style="--c:${g.color}">${g.grade}</div>
       <div>
         <p style="font-size:24px">${g.text}</p>
-        <p class="fine">${fmtInt(m.trips.length)} Fernverkehrsfahrten · ${fmtInt(r.base.arrivals)} Ankünfte in Deutschland · ${r.simulations} Simulationsläufe für die Gegenrechnung</p>
+        <p class="fine">${real ? 'Echte Ist-Daten' : 'Simulierter Tag'} · ${fmtInt(r.base.arrivals)} Ankünfte in Deutschland · ${r.simulations} Simulationsläufe für die Gegenrechnung</p>
       </div>
     </div>
 
@@ -109,7 +158,7 @@ export function renderReport(m: DayModel, r: DailyReport, opts: { partial: boole
     </div>
     <div class="compare">
       <div class="kpi"><span class="kpi-label">Pünktlichkeit</span><span class="kpi-value">${fmtPct(r.base.punctuality)}</span><span class="kpi-hint">mit Vorschlägen ${fmtPct(optimized.punctuality)} (${punctDelta >= 0 ? '+' : ''}${punctDelta.toFixed(1).replace('.', ',')} Pp)</span></div>
-      <div class="kpi"><span class="kpi-label">Fahrgast-Verspätung</span><span class="kpi-value">${fmtInt(r.base.passengerDelayMinutes / 60)} h</span><span class="kpi-hint">mit Vorschlägen ${fmtInt(optimized.passengerDelayMinutes / 60)} h (−${fmtPct(savedPct, 0)})</span></div>
+      <div class="kpi"><span class="kpi-label">Fahrgast-Verspätung</span><span class="kpi-value">${fmtInt(r.base.passengerDelayMinutes / 60)} h</span><span class="kpi-hint">mit Vorschlägen ${fmtInt(optimized.passengerDelayMinutes / 60)} h (${savedPct >= 0.005 ? '−' : savedPct <= -0.005 ? '+' : '±'}${fmtPct(Math.abs(savedPct), 0)})</span></div>
       <div class="kpi"><span class="kpi-label">Anschlüsse verpasst</span><span class="kpi-value">${fmtInt(r.base.missedConnections)}</span><span class="kpi-hint">ca. ${fmtInt(r.base.strandedPassengers)} Umsteiger · mit Vorschlägen ${fmtInt(optimized.missedConnections)}</span></div>
       <div class="kpi"><span class="kpi-label">Ø Verspätung</span><span class="kpi-value">${r.base.avgDelay.toFixed(1).replace('.', ',')} Min</span><span class="kpi-hint">je Ankunft</span></div>
     </div>
@@ -119,27 +168,18 @@ export function renderReport(m: DayModel, r: DailyReport, opts: { partial: boole
     ${suggestions.length ? suggestions.join('') : '<p class="fine">Keine Entscheidung hätte heute spürbar geholfen.</p>'}
     <p class="fine">Grün umrandet: in der Kombination übernommen (${plan.applied.length} Entscheidungen). Jeder Vorschlag ist eine komplette Neusimulation des Tages mit genau dieser einen Änderung.</p>
 
-    <h3>Woher die Verspätungen kamen</h3>
+    <h3>${real ? 'Wo die Verspätungen entstanden' : 'Woher die Verspätungen kamen'}</h3>
     <div class="bars">
       ${causes
         .map(
-          ([k, v]) => `<div class="bar"><span>${CAUSE_LABEL[k]}</span><div class="bar-track"><div class="bar-fill" style="width:${((v / maxCause) * 100).toFixed(1)}%;--c:${CAUSE_COLORS[k]}"></div></div><span class="num">${fmtPct(v / causeTotal, 0)}</span></div>`,
+          ([k, v]) => `<div class="bar"><span>${labels[k]}</span><div class="bar-track"><div class="bar-fill" style="width:${((v / maxCause) * 100).toFixed(1)}%;--c:${CAUSE_COLORS[k]}"></div></div><span class="num">${fmtPct(v / causeTotal, 0)}</span></div>`,
         )
         .join('')}
     </div>
 
     <div class="two-col">
       <div>
-        <h3>Teuerste Störungen</h3>
-        <table class="table">
-          ${r.incidents
-            .filter((i) => i.directMinutes > 0)
-            .slice(0, 7)
-            .map(
-              (i) => `<tr><td>${INCIDENT_LABEL[i.incident.kind]}<br><span class="fine">${esc(incidentPlace(m, i.incident))}${i.incident.kind === 'bau' ? ' · ganztägig' : ` · ${hhmm(i.incident.start)}–${hhmm(i.incident.end)}`}</span></td><td class="num">${fmtInt(i.directMinutes)} Min<br><span class="fine">${i.trainsAffected} Züge</span></td></tr>`,
-            )
-            .join('')}
-        </table>
+        ${real && opts.observed ? worstTrains(m, opts.observed) : incidentTable(m, r)}
       </div>
       <div>
         <h3>Knoten mit Verspätungszuwachs</h3>
@@ -152,7 +192,7 @@ export function renderReport(m: DayModel, r: DailyReport, opts: { partial: boole
       </div>
     </div>
 
-    <h3>Verspätungs-Verbreiter</h3>
+    <h3>Verspätungs-Verbreiter${real ? ' (laut Modell)' : ''}</h3>
     <table class="table">
       ${r.spreaders
         .slice(0, 6)
@@ -161,6 +201,7 @@ export function renderReport(m: DayModel, r: DailyReport, opts: { partial: boole
     </table>
 
     <h3>Wie belastbar ist das?</h3>
+    ${real ? `<p class="fine">Die Ist-Zeiten stammen aus dem GTFS-Realtime-Feed von gtfs.de (DELFI). Für die Gegenrechnung wird der echte Tag in Verspätungszuwächse je Abschnitt und Halt zerlegt und mit dem Netzmodell nachgespielt. Jeder Vorschlag ist der Unterschied zwischen zwei Modellläufen, übertragen auf die echten Zahlen. Gründe für Verspätungen (z. B. Störungen) enthält der Feed nicht.</p>` : ''}
     <p class="fine">Die Gegenrechnung nutzt ein vereinfachtes Netzmodell: Mindestzugfolge von 3 Minuten je Abschnitt, kein Überholen auf freier Strecke, Fahrzeitreserven, Umsteigezeit 3 Minuten, geschätzte Fahrgastzahlen je Zuggattung. Nicht modelliert sind Nah- und Güterverkehr, Gleisbelegung in Bahnhöfen, Fahrzeug- und Personalumläufe sowie Umleitungen. Die Vorschläge zeigen, wo sich ein genauer Blick lohnt. Sie sind keine geprüften Dispositionsanweisungen.</p>
   `;
 }

@@ -18,17 +18,24 @@ export interface TimetableStation {
 }
 
 export interface TimetableTrip {
+  /** trip_id im GTFS-Feed – Schlüssel für die Echtzeitdaten (GTFS-RT). */
+  id: string;
   route: number;
   operator: string;
   days: number;
   stops: number[];
   /** Je Halt [Ankunft, Abfahrt] in Minuten ab Mitternacht des Verkehrstags (kann > 1440 sein). */
   times: number[];
+  /** GTFS stop_sequence je Halt, nur wenn nicht 0, 1, 2, … */
+  seqs?: number[];
 }
 
 /** Eine Fahrt an einem konkreten Verkehrstag. */
 export interface Trip {
   id: number;
+  gtfsId: string;
+  /** GTFS stop_sequence je Halt */
+  seqs: number[];
   line: string;
   category: string;
   operator: string;
@@ -82,6 +89,10 @@ export type Cause =
 export interface TripResult {
   arr: number[];
   dep: number[];
+  /** Nur bei Echtzeitdaten: false = für diese Fahrt liegen keine Daten vor (Sollzeiten). */
+  known?: boolean;
+  /** Nur bei Echtzeitdaten: Fahrt fällt aus. */
+  canceled?: boolean;
   /** Ursachen je Halt-Index (für den Abschnitt, der an diesem Halt endet bzw. die Abfahrt dort). */
   causes: Cause[][];
 }

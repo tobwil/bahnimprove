@@ -23,6 +23,12 @@ export interface DayModel {
   /** Haltezeitüberschreitung bei vollen, verspäteten Zügen. */
   dwellNoise: Float64Array[];
   passengers: Float64Array;
+  /** Nur beim Nachspielen echter Tage: feste Haltezeitverlängerung je Fahrt und Halt. */
+  fixedDwell?: Float64Array[];
+  /** Nur beim Nachspielen echter Tage: ausgefallene Fahrten (1) werden nicht simuliert. */
+  skip?: Uint8Array;
+  /** Aufholbare Fahrzeitreserve (Anteil); beim Nachspielen 0, weil die Ist-Daten das Aufholen schon enthalten. */
+  reserve?: number;
 }
 
 export const edgeKey = (from: number, to: number) => from * 100000 + to;
@@ -55,6 +61,8 @@ export function tripsForDate(tt: Timetable, date: string): Trip[] {
     const line = tt.routes[t.route];
     trips.push({
       id: trips.length,
+      gtfsId: t.id,
+      seqs: t.seqs ?? t.stops.map((_, i) => i),
       line,
       category: categoryOf(line),
       operator: t.operator,
