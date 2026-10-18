@@ -1,5 +1,5 @@
 import type { Config } from '@netlify/functions';
-import { collect, store } from './shared.mts';
+import { collect, store } from '../realtime-store.mts';
 
 /** Verkehrstag (YYYYMMDD) in Berlin; bis 03:00 zählt noch der Vortag. */
 function serviceDate(now = new Date()): string {

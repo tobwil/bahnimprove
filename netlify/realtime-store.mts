@@ -1,7 +1,7 @@
 import { getStore } from '@netlify/blobs';
-import timetable from '../../public/data/timetable.json' with { type: 'json' };
-import { extractTrips, fetchFeed } from '../../src/realtime/feed.ts';
-import { mergeDay, type RealtimeDay } from '../../src/realtime/types.ts';
+import timetable from '../public/data/timetable.json' with { type: 'json' };
+import { extractTrips, fetchFeed } from '../src/realtime/feed.ts';
+import { mergeDay, type RealtimeDay } from '../src/realtime/types.ts';
 
 const tripIds = new Set((timetable as { trips: { id: string }[] }).trips.map((t) => t.id));
 
