@@ -5,11 +5,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="theme-color" content="#070a14" />
     <title>Bahnimprove Leitstand</title>
-    <meta name="description" content="Pixel-Leitstand für den deutschen Fernverkehr: Live-Karte, echte Verspätungen und ein Tagesbericht mit Dispositionsvorschlägen." />
+    <meta name="description" content="Alle Züge in Deutschland live auf einer Pixelkarte, mit echten Verspätungen, Umstiegsprognose und offenen Lessons learned für die Bahn." />
+    <meta property="og:title" content="Bahnimprove Leitstand" />
+    <meta property="og:description" content="Alle Züge live, Umstiegsprognose und offene Lessons learned für die Bahn – aus echten Ist-Daten." />
+    <meta property="og:type" content="website" />
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 8 8' shape-rendering='crispEdges'%3E%3Crect width='8' height='8' fill='%23070a14'/%3E%3Crect x='1' y='2' width='6' height='3' fill='%23ffc56b'/%3E%3Crect x='2' y='3' width='1' height='1' fill='%23070a14'/%3E%3Crect x='5' y='3' width='1' height='1' fill='%23070a14'/%3E%3Crect x='1' y='6' width='6' height='1' fill='%238ab4ff'/%3E%3C/svg%3E" />
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&family=Pixelify+Sans:wght@500;700&family=Silkscreen&display=swap" rel="stylesheet" />
   </head>
   <body>
     <div class="app" id="app">
@@ -52,7 +52,7 @@
               <span id="kpi-punct" class="gauge-value">–</span>
             </div>
             <div class="status-text">
-              <span class="eyebrow">Pünktlichkeit heute</span>
+              <span class="eyebrow">Pünktlichkeit Fernverkehr heute</span>
               <span id="status-line" class="status-line">Lade Fahrplan und Echtzeit …</span>
               <span id="source-chip" class="source-chip">…</span>
             </div>
@@ -140,6 +140,9 @@
               <div class="report-teaser" id="report-teaser"></div>
               <button id="open-report" class="ghost-btn ghost-btn--wide">Tagesbericht öffnen</button>
             </section>
+            <section class="block">
+              <button id="open-about" class="ghost-btn ghost-btn--wide">Über, offene Daten &amp; Datenschutz</button>
+            </section>
           </div>
 
           <div class="view" id="view-detail" hidden>
@@ -159,7 +162,10 @@
         <header class="report-head">
           <span class="eyebrow" id="report-eyebrow">Tagesabschluss</span>
           <h2 id="report-title">Tagesbericht</h2>
-          <button id="report-close" class="tool-btn" aria-label="Bericht schließen">×</button>
+          <div class="report-actions">
+            <button id="report-share" class="ghost-btn" hidden>Teilen</button>
+            <button id="report-close" class="tool-btn" aria-label="Bericht schließen">×</button>
+          </div>
         </header>
         <div id="report-body" class="report-body"></div>
       </div>

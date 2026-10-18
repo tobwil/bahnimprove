@@ -4,3 +4,9 @@
 
 [build.environment]
   NODE_VERSION = "22"
+
+# Teilbarer Wochenbericht
+[[redirects]]
+  from = "/bericht"
+  to = "/index.html"
+  status = 200

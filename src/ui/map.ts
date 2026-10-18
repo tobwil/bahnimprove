@@ -35,6 +35,7 @@ const PALETTE = {
   border: ['#1f2a40', '#3a4a66'],
   deBorder: ['#2c4a44', '#5c8a6a'],
   track0: ['#18213a', '#33415e'],
+  rvTrack: ['#26324f', '#3f4d6e'],
   track1: ['#24304f', '#46587c'],
   track2: ['#34446b', '#6177a0'],
 } as const;
@@ -107,6 +108,8 @@ export interface Frame {
   now: number;
   /** Eigener Standort */
   user?: { lon: number; lat: number };
+  /** Fahrten mit id ≥ fvCount sind Regionalzüge (kleiner gezeichnet) */
+  fvCount?: number;
 }
 
 export class PixelMap {
@@ -128,6 +131,9 @@ export class PixelMap {
   insets = { top: 0, bottom: 0 };
   private baseScale = 1;
   private edges: { a: number; b: number; n: number }[] = [];
+  /** Gleise, die nur Regionalzüge nutzen */
+  private rvEdges: { a: number; b: number }[] = [];
+  private usedStations = new Set<number>();
   private stationXY = new Float32Array(0);
   private lastTrains: { x: number; y: number; trip: number }[] = [];
   private dirty = true;
@@ -138,26 +144,38 @@ export class PixelMap {
     readonly canvas: HTMLCanvasElement,
     readonly glowCanvas: HTMLCanvasElement,
     private mapData: MapData,
-    private model: DayModel,
+    public model: DayModel,
   ) {
     this.ctx = canvas.getContext('2d')!;
     this.glowCtx = glowCanvas.getContext('2d')!;
     this.setModel(model);
   }
 
-  setModel(model: DayModel) {
+  setModel(model: DayModel, fvCount = model.trips.length) {
     this.model = model;
     const usage = new Map<number, { a: number; b: number; n: number }>();
+    const rv = new Map<number, { a: number; b: number }>();
     for (const t of model.trips) {
+      const regional = t.id >= fvCount;
       for (let i = 0; i + 1 < t.stops.length; i++) {
         const a = Math.min(t.stops[i], t.stops[i + 1]), b = Math.max(t.stops[i], t.stops[i + 1]);
         const k = a * 100000 + b;
+        if (regional) {
+          if (!rv.has(k)) rv.set(k, { a, b });
+          continue;
+        }
         const e = usage.get(k);
         if (e) e.n++;
         else usage.set(k, { a, b, n: 1 });
       }
     }
     this.edges = [...usage.values()].sort((x, y) => x.n - y.n);
+    this.rvEdges = [...rv.entries()].filter(([k]) => !usage.has(k)).map(([, e]) => e);
+    this.usedStations = new Set<number>();
+    for (const e of [...this.edges, ...this.rvEdges]) {
+      this.usedStations.add(e.a);
+      this.usedStations.add(e.b);
+    }
     // Stadtlichter: feste Muster um große Bahnhöfe
     this.cityLights = [];
     let seed = 7;
@@ -325,13 +343,14 @@ export class PixelMap {
         if (l.warm && night > 0.5) glow[y * w + x] = C.lampDim;
       }
     }
+    // Regionalgleise dezent, darüber der Fernverkehr
+    for (const e of this.rvEdges) this.line(buf, this.stationXY[e.a * 2], this.stationXY[e.a * 2 + 1], this.stationXY[e.b * 2], this.stationXY[e.b * 2 + 1], P.rvTrack);
     const maxN = this.edges.length ? this.edges[this.edges.length - 1].n : 1;
     for (const e of this.edges) {
       const level = e.n > maxN * 0.35 ? P.track2 : e.n > maxN * 0.1 ? P.track1 : P.track0;
       this.line(buf, this.stationXY[e.a * 2], this.stationXY[e.a * 2 + 1], this.stationXY[e.b * 2], this.stationXY[e.b * 2 + 1], level);
     }
-    const used = new Set<number>();
-    for (const e of this.edges) { used.add(e.a); used.add(e.b); }
+    const used = this.usedStations;
     for (const i of used) {
       const s = st[i];
       if (/\(Gr\)|Grenze/.test(s.name)) continue;
@@ -339,14 +358,15 @@ export class PixelMap {
       if (s.weight > 300) {
         this.rect(buf, x - 1, y - 1, 2, 2, night > 0.5 ? C.lamp : C.hub);
         if (night > 0.3) this.rect(glow, x - 1, y - 1, 2, 2, C.lamp);
-      } else this.set(buf, x, y, s.weight > 100 ? C.hub : C.station);
+      } else if (s.weight > 0 || this.zoom >= 2.5) this.set(buf, x, y, s.weight > 100 ? C.hub : C.station);
     }
     this.renderLabels(buf, used);
   }
 
   private renderLabels(buf: Uint32Array, used: Set<number>) {
     const st = this.model.stations;
-    const candidates = [...used].filter((i) => inGermany(st[i]) && !/\(Gr\)|Grenze/.test(st[i].name)).sort((a, b) => st[b].weight - st[a].weight);
+    const rank = (i: number) => st[i].weight * 10 + (this.zoom >= 4 ? (st[i].w ?? 0) : 0);
+    const candidates = [...used].filter((i) => inGermany(st[i]) && !/\(Gr\)|Grenze/.test(st[i].name) && rank(i) > 0).sort((a, b) => rank(b) - rank(a));
     const taken: { x: number; y: number; w: number; h: number }[] = [];
     const names = new Set<string>();
     const maxLabels = Math.max(9, Math.round(14 * this.zoom * Math.min(1.6, (this.w * this.h) / 120000)));
@@ -469,7 +489,9 @@ export class PixelMap {
     const sorted = [...f.trains].sort((a, b) => Number(a.known) - Number(b.known) || a.delay - b.delay);
     this.lastTrains = [];
     const big = this.zoom >= 1.6 || this.pixelSize === 2;
+    const fvCount = f.fvCount ?? Infinity;
     for (const s of sorted) {
+      const regional = s.trip >= fvCount;
       const T = m.trips[s.trip];
       const a = T.stops[s.stop];
       const b = T.stops[Math.min(s.stop + 1, T.stops.length - 1)];
@@ -479,12 +501,15 @@ export class PixelMap {
       const dx = (bx - ax) / len, dy = (by - ay) / len;
       const col = s.known ? TRAIN_PX.find((c) => s.delay < c.max)! : TRAIN_UNKNOWN;
       if (!s.atStation) {
-        this.set(buf, x - dx * 3, y - dy * 3, col.tail);
+        if (!regional) this.set(buf, x - dx * 3, y - dy * 3, col.tail);
         this.set(buf, x - dx * 2, y - dy * 2, col.tail);
       }
-      if (big) this.rect(buf, Math.round(x - 0.5), Math.round(y - 0.5), 2, 2, col.head);
+      // Regionalzüge kleiner, erst nah herangezoomt in voller Größe
+      if (big && (!regional || this.zoom >= 3.5)) this.rect(buf, Math.round(x - 0.5), Math.round(y - 0.5), 2, 2, col.head);
       else this.set(buf, x, y, col.head);
-      if (s.known) {
+      if (regional && s.delay < 16) {
+        // nur deutliche Verspätungen leuchten
+      } else if (s.known) {
         this.set(glow, x, y, col.head);
         if (s.delay >= 31) this.rect(glow, Math.round(x) - 1, Math.round(y) - 1, 3, 3, col.head);
       }
@@ -528,8 +553,8 @@ export class PixelMap {
     if (best) return best;
     bestD = this.pixelSize === 2 ? 7 : 5;
     const st = this.model.stations;
-    for (let i = 0; i < st.length; i++) {
-      if (st[i].weight < 20) continue;
+    for (const i of this.usedStations) {
+      if (st[i].weight < 20 && this.zoom < 2.5) continue;
       const d = Math.hypot(this.stationXY[i * 2] - mx, this.stationXY[i * 2 + 1] - my);
       if (d < bestD) { bestD = d; best = { type: 'station', id: i }; }
     }

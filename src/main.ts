@@ -1,9 +1,20 @@
+// Schriften lokal ausliefern – keine Anfragen an Google (Datenschutz)
+import '@fontsource/geist-sans/latin-400.css';
+import '@fontsource/geist-sans/latin-500.css';
+import '@fontsource/geist-sans/latin-600.css';
+import '@fontsource/geist-mono/latin-400.css';
+import '@fontsource/geist-mono/latin-500.css';
+import '@fontsource/pixelify-sans/latin-500.css';
+import '@fontsource/pixelify-sans/latin-700.css';
+import '@fontsource/silkscreen/latin-400.css';
 import './style.css';
 import { dailyReport, type DailyReport, type Objective } from './sim/analysis.ts';
 import { defaultPolicy, simulate } from './sim/engine.ts';
 import { ArrivalIndex, activeIncidents as simIncidents, hotspotsAt, hourlyPunctuality, trainAt, trainsAt, type LiveHotspot, type TrainState } from './sim/live.ts';
 import { buildDayModel, type DayModel } from './sim/model.ts';
 import { observedResult, type ObservedStats } from './sim/real.ts';
+import { RegionalLayer } from './regional/layer.ts';
+import { tilesAround, tilesInBounds } from './data/regional.ts';
 import type { RealtimeDay } from './realtime/types.ts';
 import { causeText, fmtDelay, hhmm, shortName, tripLabel } from './sim/text.ts';
 import type { SimResult, Timetable } from './sim/types.ts';
@@ -11,6 +22,7 @@ import { $, delayColor, esc } from './ui/dom.ts';
 import { PixelMap } from './ui/map.ts';
 import type { MapData } from './ui/mapdata.ts';
 import { gradeOf, renderReport } from './ui/report.ts';
+import { MapGestures } from './ui/gestures.ts';
 import { Sheet } from './ui/sheet.ts';
 import { Timeline } from './ui/timeline.ts';
 import { emptyRow, hotspotRow, incidentRow, journeyCard, journeyVerdict, searchHitRow, stationBoard, stationRow, trainDetail, trainRow, type Buildup } from './ui/views.ts';
@@ -18,6 +30,7 @@ import { aggregateDay, findings, mergeDays, type Insights } from './insights/agg
 import { searchJourneys, type JourneyResult } from './sim/journey.ts';
 import { matchStations, search } from './sim/search.ts';
 import { insightsPage, insightsTeaser } from './ui/insights.ts';
+import { aboutPage } from './ui/about.ts';
 
 /** Ab dieser Uhrzeit beginnt ein neuer Verkehrstag (Nachtzüge laufen über Mitternacht). */
 const DAY_ROLLOVER = 180;
@@ -34,6 +47,8 @@ interface Day {
   mode: 'real' | 'sim';
   stats?: ObservedStats;
   report?: DailyReport;
+  /** Regionalzüge dieses Verkehrstags (Kacheln nach Bedarf) */
+  regional: RegionalLayer;
 }
 
 /** Echtzeitdaten: in Produktion von der Netlify Function, lokal von scripts/collect-realtime.ts. */
@@ -76,9 +91,20 @@ const fmtDate = (d: string) =>
 
 const punctColor = (p: number) => delayColor(p > 0.85 ? 0 : p > 0.7 ? 10 : p > 0.55 ? 20 : 40);
 
+/** Fahrplan aus dem nächtlichen Server-Job, sonst der mitgelieferte. */
+async function loadTimetable(): Promise<Timetable> {
+  try {
+    const r = await fetch('api/static/timetable');
+    if (r.ok && r.headers.get('content-type')?.includes('json')) return (await r.json()) as Timetable;
+  } catch {
+    // mitgelieferten nehmen
+  }
+  return (await fetch('data/timetable.json')).json() as Promise<Timetable>;
+}
+
 async function main() {
   const [tt, mapData] = await Promise.all([
-    fetch('data/timetable.json').then((r) => r.json() as Promise<Timetable>),
+    loadTimetable(),
     fetch('data/map.json').then((r) => r.json() as Promise<MapData>),
   ]);
 
@@ -97,7 +123,12 @@ async function main() {
     if (!d) {
       const model = buildDayModel(tt, date);
       const result = simulate(model, defaultPolicy());
-      d = { date, model, result, arrivals: new ArrivalIndex(model, result), bins: hourlyPunctuality(model, result), mode: 'sim' };
+      const regional = new RegionalLayer(tt.stations, date, tt.version);
+      d = { date, model, result, arrivals: new ArrivalIndex(model, result), bins: hourlyPunctuality(model, result), mode: 'sim', regional };
+      const day = d;
+      regional.onChange = () => {
+        if (state.day === day) renderPanels(netTrains());
+      };
       days.set(date, d);
       await refreshRealtime(d);
     }
@@ -116,6 +147,12 @@ async function main() {
     user: undefined as { lat: number; lon: number } | undefined,
     hotspots: [] as LiveHotspot[],
   };
+
+  /** Fern- und geladener Regionalverkehr als ein Netz – für Karte, Suche, Reise und Tafeln. */
+  const net = () => state.day.regional.network(state.day.model, state.day.result);
+  const netTrains = () => trainsAt(net().model, net().result, state.time);
+  /** Regionalkacheln für einen Ort laden (Standort, Bahnhof, Reise). */
+  const loadAround = (lat: number, lon: number, radius = 1) => state.day.regional.ensure(tilesAround(lat, lon, radius));
 
   const canvas = $<HTMLCanvasElement>('map');
   const map = new PixelMap(canvas, $<HTMLCanvasElement>('glow'), mapData, state.day.model);
@@ -151,9 +188,9 @@ async function main() {
 
   const switchDay = async (date: string) => {
     state.day = await loadDay(date);
-    map.setModel(state.day.model);
+    map.setModel(net().model, net().fvCount);
     closeDetail();
-    renderPanels(trainsAt(state.day.model, state.day.result, state.time));
+    renderPanels(netTrains());
   };
 
   const goLive = async () => {
@@ -190,71 +227,27 @@ async function main() {
   });
 
   // --- Karte: Zoom, Pan, Auswahl ---------------------------------------------
-  let drag: { x: number; y: number; moved: boolean } | null = null;
-  const pointers = new Map<number, { x: number; y: number }>();
-  let pinchDist = 0;
-  canvas.addEventListener('pointerdown', (e) => {
-    canvas.setPointerCapture(e.pointerId);
-    pointers.set(e.pointerId, { x: e.offsetX, y: e.offsetY });
-    if (pointers.size === 2) {
-      const [a, b] = [...pointers.values()];
-      pinchDist = Math.hypot(a.x - b.x, a.y - b.y);
-    }
-    drag = { x: e.offsetX, y: e.offsetY, moved: false };
-  });
-  canvas.addEventListener('pointermove', (e) => {
-    if (pointers.has(e.pointerId)) pointers.set(e.pointerId, { x: e.offsetX, y: e.offsetY });
-    if (pointers.size === 2) {
-      const [a, b] = [...pointers.values()];
-      const d = Math.hypot(a.x - b.x, a.y - b.y);
-      if (pinchDist > 0) {
-        const [mx, my] = map.toMapPixel((a.x + b.x) / 2, (a.y + b.y) / 2);
-        map.zoomAt(d / pinchDist, mx, my);
-      }
-      pinchDist = d;
-      if (drag) drag.moved = true;
-      return;
-    }
-    if (drag) {
-      const dx = e.offsetX - drag.x, dy = e.offsetY - drag.y;
-      if (drag.moved || Math.hypot(dx, dy) > 5) {
-        drag.moved = true;
-        canvas.classList.add('is-dragging');
-        const [mx0, my0] = map.toMapPixel(drag.x, drag.y);
-        const [mx1, my1] = map.toMapPixel(e.offsetX, e.offsetY);
-        map.pan(mx0 - mx1, my0 - my1);
-        drag.x = e.offsetX;
-        drag.y = e.offsetY;
-      }
-      return;
-    }
-    if (e.pointerType === 'mouse') hover(e.offsetX, e.offsetY);
-  });
-  const endPointer = (e: PointerEvent) => {
-    pointers.delete(e.pointerId);
-    if (pointers.size < 2) pinchDist = 0;
-    if (drag && !drag.moved && pointers.size === 0) {
-      const [mx, my] = map.toMapPixel(e.offsetX, e.offsetY);
+  const gestures = new MapGestures(canvas, {
+    pan: (dx, dy) => {
+      const [x0, y0] = map.toMapPixel(0, 0);
+      const [x1, y1] = map.toMapPixel(dx, dy);
+      map.pan(x0 - x1, y0 - y1);
+    },
+    zoom: (factor, x, y) => {
+      const [mx, my] = map.toMapPixel(x, y);
+      map.zoomAt(factor, mx, my);
+    },
+    tap: (x, y) => {
+      const [mx, my] = map.toMapPixel(x, y);
       const hit = map.hitTest(mx, my);
       if (hit?.type === 'train') selectTrain(hit.id, false);
       else if (hit?.type === 'station') selectStation(hit.id);
       else closeDetail();
-    }
-    if (pointers.size === 0) drag = null;
-    canvas.classList.remove('is-dragging');
-  };
-  canvas.addEventListener('pointerup', endPointer);
-  canvas.addEventListener('pointercancel', endPointer);
-  canvas.addEventListener('pointerleave', () => ($('tooltip').hidden = true));
-  canvas.addEventListener(
-    'wheel',
-    (e) => {
-      e.preventDefault();
-      const [mx, my] = map.toMapPixel(e.offsetX, e.offsetY);
-      map.zoomAt(e.deltaY < 0 ? 1.2 : 1 / 1.2, mx, my);
     },
-    { passive: false },
-  );
+    hover: (x, y) => hover(x, y),
+  });
+  canvas.addEventListener('pointerleave', () => ($('tooltip').hidden = true));
+  if (import.meta.env.DEV) Object.assign(window, { __map: map });
   $('zoom-in').addEventListener('click', () => map.zoomAt(1.5, map.w / 2, map.h / 2));
   $('zoom-out').addEventListener('click', () => map.zoomAt(1 / 1.5, map.w / 2, map.h / 2));
   $('zoom-reset').addEventListener('click', () => map.reset());
@@ -269,9 +262,9 @@ async function main() {
       return;
     }
     canvas.style.cursor = 'pointer';
-    const m = state.day.model;
+    const m = net().model;
     if (hit.type === 'train') {
-      const s = trainAt(m, state.day.result, hit.id, state.time);
+      const s = trainAt(m, net().result, hit.id, state.time);
       tooltip.innerHTML = `${esc(tripLabel(m, hit.id))} <b style="color:${s?.known ? delayColor(s.delay) : 'var(--nodata)'}">${s?.known ? fmtDelay(s.delay) : '–'}</b>`;
     } else tooltip.textContent = shortName(m.stations[hit.id].name);
     tooltip.style.left = `${cssX}px`;
@@ -302,7 +295,7 @@ async function main() {
         renderSearch(true);
         $<HTMLInputElement>('search').focus({ preventScroll: true });
       }
-      if (state.tab === 'analysis') renderPanels(trainsAt(state.day.model, state.day.result, state.time));
+      if (state.tab === 'analysis') renderPanels(netTrains());
       if (state.tab === 'trip' && !$<HTMLInputElement>('trip-time').value) $<HTMLInputElement>('trip-time').value = hhmm(state.time);
     }),
   );
@@ -314,8 +307,8 @@ async function main() {
     renderDetail(true);
     $('sheet-body').scrollTop = 0;
     if (sheet.snap === 'peek') sheet.set('half');
-    const m = state.day.model;
-    const s = trainAt(m, state.day.result, trip, state.time);
+    const m = net().model;
+    const s = trainAt(m, net().result, trip, state.time);
     if (fromList || s) {
       const T = m.trips[trip];
       const a = m.stations[T.stops[s?.stop ?? 0]], b = m.stations[T.stops[Math.min((s?.stop ?? 0) + 1, T.stops.length - 1)]];
@@ -333,6 +326,7 @@ async function main() {
     if (sheet.snap === 'peek') sheet.set('half');
     const st = state.day.model.stations[station];
     requestAnimationFrame(() => map.ensureVisible(st.lon, st.lat, sheet.visibleHeight()));
+    void loadAround(st.lat, st.lon, 0).then(() => renderDetail(true));
   }
 
   function closeDetail() {
@@ -348,9 +342,9 @@ async function main() {
 
   /** Echte Daten: wo ist die Verspätung entstanden? Simulation: Ursachen aus dem Modell. */
   function buildup(id: number): Buildup[] {
-    const m = state.day.model;
+    const m = net().model;
     const T = m.trips[id];
-    const R = state.day.result.trips[id];
+    const R = net().result.trips[id];
     if (R.known === false || R.canceled) return [];
     if (state.day.mode === 'sim') {
       return R.causes.flatMap((cs, i) =>
@@ -374,7 +368,7 @@ async function main() {
   }
 
   function renderDetail(force = false) {
-    const m = state.day.model, r = state.day.result;
+    const { model: m, result: r } = net();
     if (state.selectedTrain !== undefined) {
       const id = state.selectedTrain;
       setHtml('detail', trainDetail(m, r, id, trainAt(m, r, id, state.time), state.time, buildup(id)), force);
@@ -401,14 +395,22 @@ async function main() {
   $<HTMLInputElement>('search').addEventListener('input', () => renderSearch(true));
 
   // --- Suche -------------------------------------------------------------------
+  let searchLoaded: number | undefined;
   function renderSearch(force = false) {
-    const m = state.day.model, r = state.day.result;
+    const { model: m, result: r } = net();
     const q = $<HTMLInputElement>('search').value;
     if (!q.trim()) {
       setHtml('search-results', emptyRow('Linie (ICE 28), Bahnhof (Köln) oder Strecke (Köln München) eingeben.'), force);
       return;
     }
     const res = search(m, r, q, state.time);
+    // Regionalzüge des gesuchten Bahnhofs nachladen und dann neu suchen
+    const top = res.stations[0];
+    if (top !== undefined && searchLoaded !== top) {
+      searchLoaded = top;
+      const st = m.stations[top];
+      void loadAround(st.lat, st.lon, 0).then((changed) => changed && renderSearch(true));
+    }
     const html = res.stations.map((st) => stationRow(m, st)).join('') + res.trips.map((h) => searchHitRow(m, r, h)).join('');
     setHtml('search-results', html || emptyRow('Nichts gefunden. Tipp: Bahnhofsname ohne „Hbf“ oder nur die Liniennummer.'), force);
   }
@@ -425,8 +427,8 @@ async function main() {
   const distKm = (a: { lat: number; lon: number }, b: { lat: number; lon: number }) => Math.hypot((a.lat - b.lat) * 111.3, (a.lon - b.lon) * 111.3 * Math.cos((a.lat * Math.PI) / 180));
   const nearestStations = (p: { lat: number; lon: number }, n = 3) =>
     state.day.model.stations
-      .map((s, i) => ({ i, d: distKm(p, s), w: s.weight }))
-      .filter((x) => x.w >= 20 && !/\(Gr\)|Grenze/.test(state.day.model.stations[x.i].name))
+      .map((s, i) => ({ i, d: distKm(p, s), w: s.w ?? s.weight }))
+      .filter((x) => x.w >= 1 && !/\(Gr\)|Grenze/.test(state.day.model.stations[x.i].name))
       .sort((a, b) => a.d - b.d)
       .slice(0, n);
   function renderNearby() {
@@ -447,6 +449,7 @@ async function main() {
         locateBtn.classList.add('is-active');
         state.user = { lat: pos.coords.latitude, lon: pos.coords.longitude };
         renderNearby();
+        void loadAround(state.user.lat, state.user.lon);
         const near = nearestStations(state.user, 1)[0];
         const from = $<HTMLInputElement>('trip-from');
         if (near && !from.value) {
@@ -455,7 +458,7 @@ async function main() {
         }
         if (!silent) {
           map.ensureVisible(state.user.lon, state.user.lat, sheet.visibleHeight(), 3);
-          if (near) toast(`Nächster Fernverkehrsbahnhof: ${state.day.model.stations[near.i].name} (${near.d < 1 ? `${Math.round(near.d * 1000)} m` : `${near.d.toFixed(1).replace('.', ',')} km`})`);
+          if (near) toast(`Nächster Bahnhof: ${state.day.model.stations[near.i].name} (${near.d < 1 ? `${Math.round(near.d * 1000)} m` : `${near.d.toFixed(1).replace('.', ',')} km`})`);
         }
       },
       (err) => {
@@ -483,6 +486,7 @@ async function main() {
   let tripFrom: number | undefined;
   let tripTo: number | undefined;
   let lastJourneys: JourneyResult | null = null;
+  let tripDay: Day | null = null;
   const suggestEl = $('trip-suggest');
   let suggestFor: 'from' | 'to' | null = null;
   const showSuggest = (which: 'from' | 'to') => {
@@ -539,7 +543,7 @@ async function main() {
     runJourney();
   });
   const resolveStation = (value: string) => matchStations(state.day.model, value.split(' '), 1)[0];
-  function runJourney() {
+  async function runJourney() {
     const m = state.day.model;
     tripFrom ??= resolveStation($<HTMLInputElement>('trip-from').value);
     tripTo ??= resolveStation($<HTMLInputElement>('trip-to').value);
@@ -558,25 +562,41 @@ async function main() {
       after = h * 60 + mm;
       if (after < DAY_ROLLOVER && state.time > DAY_ROLLOVER) after += 1440;
     }
-    lastJourneys = searchJourneys(m, state.day.result, tripFrom, tripTo, after - 5, state.time);
+    $('trip-results').innerHTML = `<p class="fine">Suche Verbindungen, lade Regionalzüge rund um Start und Ziel …</p>`;
+    // Eine Uhrzeit, die heute schon vorbei ist, meint morgen
+    let day = state.day;
+    let now = state.time;
+    if (tv && after < state.time - 30) {
+      day = await loadDay(addDays(state.day.date, 1));
+      now = -Infinity;
+    }
+    tripDay = day;
+    const a = m.stations[tripFrom], b = m.stations[tripTo];
+    await Promise.all([a, b].map((st) => day.regional.ensure(tilesAround(st.lat, st.lon, 1))));
+    const n = day.regional.network(day.model, day.result);
+    lastJourneys = searchJourneys(n.model, n.result, tripFrom, tripTo, after - 5, now);
     renderJourneys();
   }
   function renderJourneys() {
     if (!lastJourneys) return;
-    const m = state.day.model;
+    const day = tripDay ?? state.day;
+    const m = day.regional.network(day.model, day.result).model;
     const res = lastJourneys;
+    const other = day !== state.day ? `<p class="fine">Verbindungen für ${fmtDate(day.date)} laut Fahrplan.</p>` : '';
     $('trip-results').innerHTML = res.journeys.length
-      ? `${journeyVerdict(m, res)}<div class="journeys">${res.journeys.map((j, i) => journeyCard(m, j, i === res.recommended, state.time)).join('')}</div>
-         <p class="fine">Nur Fernverkehr (ICE, IC, EC), bis zu zwei Umstiege. Die Wahrscheinlichkeit berücksichtigt die aktuelle Verspätung, wie lange der Zubringer noch unterwegs ist, und eine Mindestumsteigezeit von 4 bis 6 Minuten. Dass ein Anschlusszug wartet, ist nicht eingerechnet.</p>`
-      : `<p class="fine">Keine Fernverkehrsverbindung in den nächsten vier Stunden gefunden. Für Regionalzüge ist die App noch nicht gebaut.</p>`;
+      ? `${other}${journeyVerdict(m, res)}<div class="journeys">${res.journeys.map((j, i) => journeyCard(m, j, i === res.recommended, state.time, transferHistory)).join('')}</div>
+         <p class="fine">Fern- und Regionalverkehr (ohne Busse und Trams), bis zu zwei Umstiege. Die Wahrscheinlichkeit berücksichtigt die aktuelle Verspätung, wie lange der Zubringer noch unterwegs ist, und eine Mindestumsteigezeit von 4 bis 6 Minuten. Dass ein Anschlusszug wartet, ist nicht eingerechnet.</p>`
+      : `<p class="fine">Keine Zugverbindung mit höchstens zwei Umstiegen in den nächsten vier Stunden gefunden. Lange Strecken nur mit Regionalzügen fehlen noch: Unterwegs werden nur Fernzüge berücksichtigt.</p>`;
   }
   $('trip-results').addEventListener('click', (e) => {
     const b = (e.target as HTMLElement).closest<HTMLElement>('[data-trip]');
-    if (b) selectTrain(+b.dataset.trip!, true);
+    if (b && (!tripDay || tripDay === state.day)) selectTrain(+b.dataset.trip!, true);
   });
 
   // --- Lessons learned -------------------------------------------------------------
+  const overlay = $('report');
   let insights: Insights | null = null;
+  const transferHistory = (station: string, from: string, to: string) => insights?.transferHistory?.[`${station}|${from}|${to}`];
   async function loadInsights() {
     try {
       const r = await fetch('api/insights', { cache: 'no-cache' });
@@ -591,14 +611,39 @@ async function main() {
     const d = state.day;
     insights = d.mode === 'real' ? findings(mergeDays([aggregateDay(d.model, d.result)])) : null;
   }
-  void loadInsights().then(() => renderPanels(trainsAt(state.day.model, state.day.result, state.time)));
+  void loadInsights().then(() => renderPanels(netTrains()));
   setInterval(() => void loadInsights(), 30 * 60_000);
-  $('open-insights').addEventListener('click', () => {
+  const openInsights = () => {
     $('report-eyebrow').textContent = 'Lessons learned für die DB';
     $('report-title').textContent = 'Was die DB lernen kann';
     overlay.hidden = false;
     overlay.style.setProperty('--c', 'var(--lamp)');
-    $('report-body').innerHTML = insights ? insightsPage(insights) : '<p class="fine">Noch keine Echtzeitdaten gesammelt.</p>';
+    $('report-share').hidden = false;
+    $('report-body').innerHTML = insights ? insightsPage(insights) : '<div class="loading">Lade Erkenntnisse …<div class="loading-bar"></div></div>';
+  };
+  $('open-insights').addEventListener('click', openInsights);
+  $('open-about').addEventListener('click', () => {
+    $('report-eyebrow').textContent = 'Bahnimprove';
+    $('report-title').textContent = 'Über, Daten & Datenschutz';
+    $('report-share').hidden = true;
+    overlay.hidden = false;
+    overlay.style.setProperty('--c', 'var(--accent)');
+    $('report-body').innerHTML = aboutPage();
+  });
+  $('report-share').addEventListener('click', async () => {
+    const url = new URL(location.href);
+    url.pathname = url.pathname.replace(/\/(bericht\/?)?$/, '/bericht');
+    url.hash = '';
+    const data = { title: 'Was die DB lernen kann – Bahnimprove', text: 'Lessons learned für die Bahn aus echten Ist-Daten', url: url.toString() };
+    try {
+      if (navigator.share) await navigator.share(data);
+      else {
+        await navigator.clipboard.writeText(data.url);
+        toast('Link kopiert');
+      }
+    } catch {
+      // Teilen abgebrochen
+    }
   });
 
   /** Nur neu schreiben, wenn sich etwas geändert hat und gerade niemand tippt – sonst gehen Taps verloren. */
@@ -613,12 +658,16 @@ async function main() {
     el.innerHTML = html;
   };
 
-  function renderPanels(trains: TrainState[]) {
+  function renderPanels(all: TrainState[]) {
     const d = state.day;
-    const m = d.model;
+    const n = net();
+    const m = n.model;
     const real = d.mode === 'real';
     const sofar = d.arrivals.until(state.time);
+    // Kennzahlen gelten für den Fernverkehr (bundesweit vollständig); Listen zeigen alle geladenen Züge
+    const trains = all.filter((t) => t.trip < n.fvCount);
     const known = trains.filter((t) => t.known);
+    const allKnown = all.filter((t) => t.known);
 
     // Status
     const gauge = $('gauge');
@@ -642,7 +691,7 @@ async function main() {
     $('kpi-delay').textContent = known.length ? `${(known.reduce((s, t) => s + t.delay, 0) / known.length).toFixed(1).replace('.', ',')}′` : '–';
 
     // Jetzt
-    state.hotspots = hotspotsAt(m, d.result, state.time);
+    state.hotspots = hotspotsAt(m, n.result, state.time);
     const incs = activeIncidents(m, state.time);
     $('kpi-incidents-label').textContent = real ? 'Brennpunkte' : 'Störungen';
     $('kpi-incidents').textContent = String(real ? state.hotspots.length : incs.length);
@@ -653,7 +702,7 @@ async function main() {
       const works = incs.filter((i) => i.kind === 'bau');
       setHtml('incidents', [...acute, ...works.slice(0, 3)].map((i) => incidentRow(m, i)).join('') || emptyRow('Keine Störungen.'));
     }
-    const top = [...known].sort((a, b) => b.delay - a.delay).slice(0, 6);
+    const top = [...allKnown].sort((a, b) => b.delay - a.delay).slice(0, 6);
     setHtml('worst', top.length ? top.map((t) => trainRow(m, t)).join('') : emptyRow('Gerade kein Zug unterwegs.'));
 
     if (!views.search.hidden) renderSearch();
@@ -674,7 +723,6 @@ async function main() {
   }
 
   // --- Tagesbericht ----------------------------------------------------------
-  const overlay = $('report');
   let objective: Objective = 'punctuality';
   let objectiveChosen = false;
   const showReport = () => {
@@ -685,6 +733,7 @@ async function main() {
   };
   $('open-report').addEventListener('click', () => {
     const day = state.day;
+    $('report-share').hidden = true;
     $('report-eyebrow').textContent = 'Tagesabschluss';
     $('report-title').textContent = fmtDate(day.date);
     overlay.hidden = false;
@@ -719,7 +768,9 @@ async function main() {
   // --- Echtzeit nachladen ----------------------------------------------------
   setInterval(async () => {
     const d = state.day;
-    if (d.date === serviceNow().date && (await refreshRealtime(d))) renderPanels(trainsAt(d.model, d.result, state.time));
+    if (d.date !== serviceNow().date) return;
+    void d.regional.refresh();
+    if (await refreshRealtime(d)) renderPanels(netTrains());
   }, REALTIME_POLL);
 
   // --- Hauptschleife ---------------------------------------------------------
@@ -741,15 +792,25 @@ async function main() {
       }
     }
     const d = state.day;
-    const trains = trainsAt(d.model, d.result, state.time);
+    gestures.step();
+    const n = net();
+    // Karte immer mit dem aktuellen Netz zeichnen (Kacheln laden im Hintergrund nach)
+    if (map.model !== n.model) map.setModel(n.model, n.fvCount);
+    const trains = trainsAt(n.model, n.result, state.time);
     if (now - lastPanel > 500) {
       lastPanel = now;
+      // Regionalzüge im sichtbaren Ausschnitt nachladen, sobald nah genug herangezoomt
+      if (map.zoom >= 2.2 && !gestures.dragging) {
+        const [lon0, lat0] = map.unproject(0, 0), [lon1, lat1] = map.unproject(map.w, map.h);
+        void d.regional.ensure(tilesInBounds({ minLat: Math.min(lat0, lat1), maxLat: Math.max(lat0, lat1), minLon: lon0, maxLon: lon1 }, 24));
+      }
       renderPanels(trains);
     }
     const maxHot = Math.max(30, ...state.hotspots.map((h) => h.minutes));
     map.draw({
       trains,
       incidents: activeIncidents(d.model, state.time),
+      fvCount: n.fvCount,
       hotspots: state.hotspots.slice(0, 8).map((h) => ({ station: h.station, intensity: h.minutes / maxHot })),
       selected: { train: state.selectedTrain, station: state.selectedStation },
       minute: state.time,
@@ -761,9 +822,15 @@ async function main() {
     requestAnimationFrame(loop);
   };
 
+  // Teilbarer Wochenbericht: /bericht (oder #bericht) öffnet direkt die Lessons learned
+  const isReportLink = /\/bericht\/?$/.test(location.pathname) || location.hash === '#bericht';
+  if (isReportLink) {
+    openInsights();
+    void loadInsights().then(() => !overlay.hidden && insights && ($('report-body').innerHTML = insightsPage(insights)));
+  }
   layoutMap();
   syncControls();
-  renderPanels(trainsAt(state.day.model, state.day.result, state.time));
+  renderPanels(netTrains());
   requestAnimationFrame(loop);
 }
 

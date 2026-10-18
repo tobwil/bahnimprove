@@ -7,6 +7,7 @@ import { MIN_TRANSFER } from '../sim/engine.ts';
 import { inGermany, type DayModel } from '../sim/model.ts';
 import { OBS_ARR, OBS_DEP, counts } from '../sim/real.ts';
 import type { SimResult } from '../sim/types.ts';
+import { topReasons, type ReasonSummary } from './reasons.ts';
 
 /** Histogramm in ganzen Minuten von −10 bis +60 (Ränder gesammelt). */
 const H_MIN = -10;
@@ -196,6 +197,8 @@ export interface Finding {
   n: number;
   share: number;
   median: number;
+  /** Häufigste von der DB gemeldete Gründe an diesem Ort (falls bekannt) */
+  reasons?: string;
   /** An wie vielen der beobachteten Tage das Problem auftrat */
   daysHit: number;
   days: number;
@@ -212,6 +215,10 @@ export interface Insights {
   findings: Finding[];
   lines: { line: string; arrivals: number; punctuality: number }[];
   preliminary: boolean;
+  /** Gemeldete Verspätungsgründe (IRIS) im selben Zeitraum */
+  reasons?: ReasonSummary;
+  /** Bisherige Umstiege "Bahnhof|Zubringer|Anschluss" → [beobachtet, verpasst] – für die Reiseplanung */
+  transferHistory: Record<string, [number, number]>;
 }
 
 /** Belastbar = genug Fälle, genug Tage und das Problem tritt an der Mehrzahl der Tage auf (keine Einzelstörung). */
@@ -234,7 +241,7 @@ const topLines = (lines: Record<string, number>) =>
     .join(', ');
 
 /** Leitet Befunde ab. Schwellen sind bewusst streng: lieber wenige, die halten. */
-export function findings(agg: MultiAgg, opts: { minN?: number } = {}): Insights {
+export function findings(agg: MultiAgg, opts: { minN?: number; reasons?: ReasonSummary } = {}): Insights {
   const days = Math.max(1, agg.dates.length);
   const minN = opts.minN ?? 8;
   const out: Finding[] = [];
@@ -351,6 +358,16 @@ export function findings(agg: MultiAgg, opts: { minN?: number } = {}): Insights 
     }
   }
 
+  // Gemeldete Gründe an den betroffenen Bahnhöfen anhängen (bei Abschnitten: Startbahnhof des Abschnitts)
+  if (opts.reasons) {
+    for (const f of out) {
+      const key = (f.kind === 'section' || f.kind === 'reserve' || f.kind === 'transfer' ? f.place.split(/ → |: /)[0] : f.place).trim();
+      const st = Object.keys(opts.reasons.stations).find((n) => short(n) === key);
+      const text = st ? topReasons(opts.reasons.stations[st]) : '';
+      if (text && f.kind !== 'reserve') f.reasons = text;
+    }
+  }
+
   const rank = { belastbar: 0, hinweis: 1, vorläufig: 2 };
   out.sort((a, b) => rank[a.confidence] - rank[b.confidence] || b.minutesPerDay - a.minutesPerDay);
 
@@ -367,5 +384,7 @@ export function findings(agg: MultiAgg, opts: { minN?: number } = {}): Insights 
       .map(([line, l]) => ({ line, arrivals: l.arrivals, punctuality: l.punctual / l.arrivals }))
       .sort((a, b) => a.punctuality - b.punctuality),
     preliminary: days < 3,
+    reasons: opts.reasons,
+    transferHistory: Object.fromEntries(Object.entries(agg.transfers).filter(([, t]) => t.n >= 3).map(([k, t]) => [k, [t.n, t.missed]])),
   };
 }

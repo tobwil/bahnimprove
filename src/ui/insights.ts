@@ -1,6 +1,7 @@
 import type { Confidence, Finding, FindingKind, Insights } from '../insights/aggregate.ts';
 import { fmtInt, fmtPct } from '../sim/text.ts';
 import { esc } from './dom.ts';
+import { REASON_GROUPS, reasonGroup, reasonText, type ReasonGroup } from '../insights/reasons.ts';
 
 const GROUPS: { kind: FindingKind; title: string; lead: string }[] = [
   { kind: 'section', title: 'Fahrzeiten ehrlich planen', lead: 'Abschnitte, auf denen Züge Tag für Tag Zeit verlieren. Der Fahrplan verspricht hier mehr, als die Strecke hergibt.' },
@@ -22,9 +23,33 @@ function card(f: Finding): string {
   return `<article class="insight">
     <div class="insight-head"><span class="insight-place">${esc(f.place)}</span><span class="pill" style="--c:${c.color}">${c.label}</span></div>
     <div class="insight-evidence">${esc(f.evidence)}</div>
+    ${f.reasons ? `<div class="insight-evidence">Gemeldete Gründe hier: ${esc(f.reasons)}</div>` : ''}
     <div class="insight-measure">${esc(f.measure)}</div>
     <div class="insight-impact">${f.kind === 'reserve' ? '≈ ' + fmtInt(f.minutesPerDay) + ' Min Reserve pro Tag' : `≈ ${fmtInt(f.minutesPerDay)} Verspätungsminuten pro Tag`}</div>
   </article>`;
+}
+
+function reasonsCard(ins: Insights): string {
+  const r = ins.reasons;
+  const total = r ? Object.values(r.total).reduce((a, b) => a + b, 0) : 0;
+  if (!r || total < 20) return '';
+  const groups = new Map<ReasonGroup, number>();
+  for (const [c, n] of Object.entries(r.total)) {
+    const g = reasonGroup(+c);
+    if (g) groups.set(g, (groups.get(g) ?? 0) + n);
+  }
+  const sorted = [...groups.entries()].sort((a, b) => b[1] - a[1]);
+  const max = sorted[0]?.[1] ?? 1;
+  const colors: Record<ReasonGroup, string> = { infrastruktur: '#ff4f6e', betrieb: '#ff9a3c', fahrzeug: '#ffd447', extern: '#8b95b8', personal: '#b69cff', ausland: '#8ab4ff', fahrgaeste: '#3ee08f' };
+  const top = Object.entries(r.total).sort((a, b) => b[1] - a[1]).slice(0, 6);
+  return `<section class="card">
+    <h3>Was die DB als Grund meldet</h3>
+    <div class="bars">${sorted
+      .map(([g, n]) => `<div class="bar"><span>${REASON_GROUPS[g].label}</span><span class="num">${fmtPct(n / total, 0)}</span><div class="bar-track"><div class="bar-fill" style="width:${((n / max) * 100).toFixed(1)}%;--c:${colors[g]}"></div></div></div>`)
+      .join('')}</div>
+    <table class="table" style="margin-top:12px">${top.map(([c, n]) => `<tr><td>${esc(reasonText(+c))}</td><td class="num">${fmtPct(n / total, 0)}</td></tr>`).join('')}</table>
+    <p class="fine">${fmtInt(total)} Verspätungsmeldungen an ${Object.keys(r.stations).length} großen Bahnhöfen (IRIS-Schnittstelle der DB, ${r.days === 1 ? '1 Tag' : `${r.days} Tage`}). ${sorted[0] ? `Größter Hebel: ${esc(REASON_GROUPS[sorted[0][0]].lever)}.` : ''}</p>
+  </section>`;
 }
 
 const daysText = (n: number) => (n === 1 ? '1 Tag' : `${n} Tagen`);
@@ -72,6 +97,8 @@ export function insightsPage(ins: Insights): string {
         .join('')}</div>
       <p class="fine">Summe der verlorenen Minuten aller beobachteten Züge. Die Hebel sind entsprechend verteilt: Fahrplan und Infrastruktur für die Strecke, Bahnsteig und Haltezeit für den Halt, Bereitstellung für den Start.</p>
     </section>
+
+    ${reasonsCard(ins)}
 
     ${groups || '<section class="card"><p class="fine">Noch keine auffälligen Muster.</p></section>'}
 

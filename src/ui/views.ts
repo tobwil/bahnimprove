@@ -190,7 +190,10 @@ export const chanceLabel = (p: number) => (p >= 0.9 ? 'sicher' : p >= 0.7 ? 'wah
 
 const duration = (min: number) => `${Math.floor(min / 60)}:${String(Math.round(min % 60)).padStart(2, '0')} h`;
 
-export function journeyCard(m: DayModel, j: Journey, recommended: boolean, now: number): string {
+/** Bisherige Beobachtungen eines Umstiegs: [Anzahl, verpasst] */
+export type TransferHistory = (station: string, from: string, to: string) => [number, number] | undefined;
+
+export function journeyCard(m: DayModel, j: Journey, recommended: boolean, now: number, history?: TransferHistory): string {
   const late = j.predArr - j.schedArr;
   const legs = j.legs
     .map((l, i) => {
@@ -200,13 +203,16 @@ export function journeyCard(m: DayModel, j: Journey, recommended: boolean, now: 
     })
     .join('');
   const transfers = j.transfers
-    .map((t) => {
+    .map((t, k) => {
       const c = chanceColor(t.probability);
       const pred = Math.round(t.predicted);
+      const h = history?.(m.stations[t.station].name, m.trips[j.legs[k].trip].line, m.trips[j.legs[k + 1].trip].line);
+      const hist = h ? `<span class="fine" style="grid-column:1/-1;margin:0">Bisher ${h[0] - h[1]} von ${h[0]} Mal geklappt</span>` : '';
       return `<div class="chance" style="--c:${c}">
         <span>Umstieg ${esc(shortName(m.stations[t.station].name))}: geplant ${Math.round(t.planned)} Min, ${t.uncertain ? 'ohne Echtzeitdaten' : `heute ${pred < 0 ? `${-pred} Min zu spät` : `${pred} Min`}`} (nötig ${t.needed})</span>
         <b>${Math.round(t.probability * 100)} % · ${chanceLabel(t.probability)}</b>
         <span class="chance-bar"><span style="width:${Math.max(3, t.probability * 100)}%"></span></span>
+        ${hist}
       </div>`;
     })
     .join('');

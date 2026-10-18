@@ -21,7 +21,7 @@
 
   --f-display: 'Pixelify Sans', 'Silkscreen', ui-monospace, monospace;
   --f-micro: 'Silkscreen', ui-monospace, monospace;
-  --f-body: 'Geist', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --f-body: 'Geist Sans', 'Geist', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
   --f-mono: 'Geist Mono', ui-monospace, 'SFMono-Regular', Menlo, monospace;
 
   --sheet-peek: 236px;
@@ -633,6 +633,20 @@ button {
   border-color: #3f5290;
 }
 
+.line-badge[data-cat='RE'],
+.line-badge[data-cat='IRE'],
+.line-badge[data-cat='RB'],
+.line-badge[data-cat='MEX'] {
+  background: #3a2433;
+  border-color: #6b3b58;
+}
+
+.line-badge[data-cat='S'] {
+  background: #1d3a2b;
+  border-color: #2f6b49;
+  border-radius: 999px;
+}
+
 .line-badge[data-cat='EN'],
 .line-badge[data-cat='NJ'] {
   background: #2c2350;
@@ -986,9 +1000,22 @@ button {
   font-size: 22px;
 }
 
-.report-head .tool-btn {
+.report-head .report-actions {
   grid-column: 2;
   grid-row: 1 / span 2;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.report a {
+  color: var(--accent);
+}
+
+a.ghost-btn {
+  text-decoration: none;
+  color: var(--text);
+  display: inline-block;
 }
 
 .report-body {

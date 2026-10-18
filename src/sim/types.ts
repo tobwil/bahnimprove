@@ -7,14 +7,18 @@ export interface Timetable {
   routes: string[];
   stations: TimetableStation[];
   trips: TimetableTrip[];
+  /** Erzeugungsstand – Regionalkacheln passen nur zum Fahrplan mit gleicher Version */
+  version?: string;
 }
 
 export interface TimetableStation {
   name: string;
   lat: number;
   lon: number;
-  /** Anzahl Halte im Feed – Maß für die Bedeutung des Knotens. */
+  /** Anzahl Fernverkehrsfahrten mit Halt hier – Maß für die Bedeutung im Fernverkehr. */
   weight: number;
+  /** Zughalte pro Tag über alle Züge (Fern- und Regionalverkehr); 0 = nicht bedient */
+  w?: number;
 }
 
 export interface TimetableTrip {

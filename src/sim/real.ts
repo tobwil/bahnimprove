@@ -1,7 +1,7 @@
-import type { RealtimeDay } from '../realtime/types.ts';
+import type { RealtimeDay, RealtimeTrip } from '../realtime/types.ts';
 import { MIN_TRANSFER } from './engine.ts';
 import type { DayModel } from './model.ts';
-import type { SimResult, TripResult } from './types.ts';
+import type { SimResult, Trip, TripResult } from './types.ts';
 
 export const OBS_ARR = 1;
 export const OBS_DEP = 2;
@@ -21,62 +21,65 @@ export interface ObservedStats {
 }
 
 /**
- * Ist-Zeiten aus Echtzeitdaten. Halte ohne eigene Meldung übernehmen die zuletzt gemeldete
- * Verspätung (GTFS-Realtime-Regel); Fahrten ohne Daten behalten ihre Sollzeiten und sind `known: false`.
+ * Ist-Zeiten einer Fahrt aus ihren Echtzeitmeldungen. Halte ohne eigene Meldung übernehmen die zuletzt
+ * gemeldete Verspätung (GTFS-Realtime-Regel); ohne Daten bleiben die Sollzeiten (`known: false`).
  */
+export function observeTrip(T: Trip, data: RealtimeTrip | undefined, midnight: number): TripResult {
+  const n = T.stops.length;
+  const causes = T.stops.map(() => []);
+  if (!data || !data.u.length) return { arr: [...T.schedArr], dep: [...T.schedDep], causes, known: false };
+  if (data.canceled) return { arr: [...T.schedArr], dep: [...T.schedDep], causes, known: true, canceled: true };
+  const arrD: (number | null)[] = new Array(n).fill(null);
+  const depD: (number | null)[] = new Array(n).fill(null);
+  /** Minute im Verkehrstag der letzten Meldung zu dieser Fahrt */
+  const seen = (data.seen - midnight) / 60;
+  for (const [seq, a, d] of data.u) {
+    // Halt mit der größten stop_sequence ≤ seq (zusammengelegte Doppelhalte)
+    let k = -1;
+    for (let i = 0; i < n && T.seqs[i] <= seq; i++) k = i;
+    if (k < 0) continue;
+    if (a !== null) arrD[k] = a;
+    if (d !== null) depD[k] = d;
+  }
+  const firstKnown = [...arrD, ...depD].find((x) => x !== null) ?? 0;
+  let cur = Math.max(0, depD[0] ?? firstKnown);
+  const arr = new Array<number>(n);
+  const dep = new Array<number>(n);
+  arr[0] = T.schedArr[0];
+  dep[0] = T.schedDep[0] + cur;
+  for (let i = 1; i < n; i++) {
+    const ad = arrD[i] ?? cur;
+    arr[i] = Math.max(T.schedArr[i] + ad, dep[i - 1] + 0.5);
+    if (i === n - 1) {
+      dep[i] = arr[i];
+      break;
+    }
+    // Ohne Meldung läuft die Verspätung unverändert weiter (GTFS-Realtime-Regel).
+    const dd = depD[i] ?? arr[i] - T.schedArr[i];
+    dep[i] = Math.max(arr[i], T.schedDep[i] + dd);
+    cur = dep[i] - T.schedDep[i];
+  }
+  // Beobachtet ist, was gemeldet wurde und bei der letzten Meldung schon vorbei war.
+  const observed = new Uint8Array(n);
+  for (let i = 0; i < n; i++) {
+    if (i > 0 && arrD[i] !== null && arr[i] <= seen + 1) observed[i] |= OBS_ARR;
+    if (i < n - 1 && depD[i] !== null && dep[i] <= seen + 1) observed[i] |= OBS_DEP;
+  }
+  return { arr, dep, causes, known: true, observed };
+}
+
+/**
+ * Ist-Zeiten aus Echtzeitdaten eines ganzen Verkehrstags (siehe observeTrip). */
 export function observedResult(m: DayModel, rt: RealtimeDay): { result: SimResult; stats: ObservedStats } {
   const stats: ObservedStats = { known: 0, unknown: 0, canceled: 0, feedTime: rt.feedTime };
   const midnight = berlinMidnightEpoch(rt.date || m.date);
   const trips: TripResult[] = m.trips.map((T) => {
-    const n = T.stops.length;
     const data = rt.trips[T.gtfsId];
-    const causes = T.stops.map(() => []);
-    if (!data || !data.u.length) {
-      stats.unknown++;
-      return { arr: [...T.schedArr], dep: [...T.schedDep], causes, known: false };
-    }
-    if (data.canceled) {
-      stats.canceled++;
-      return { arr: [...T.schedArr], dep: [...T.schedDep], causes, known: true, canceled: true };
-    }
-    stats.known++;
-    const arrD: (number | null)[] = new Array(n).fill(null);
-    const depD: (number | null)[] = new Array(n).fill(null);
-    /** Minute im Verkehrstag der letzten Meldung zu dieser Fahrt */
-    const seen = (data.seen - midnight) / 60;
-    for (const [seq, a, d] of data.u) {
-      // Halt mit der größten stop_sequence ≤ seq (zusammengelegte Doppelhalte)
-      let k = -1;
-      for (let i = 0; i < n && T.seqs[i] <= seq; i++) k = i;
-      if (k < 0) continue;
-      if (a !== null) arrD[k] = a;
-      if (d !== null) depD[k] = d;
-    }
-    const firstKnown = [...arrD, ...depD].find((x) => x !== null) ?? 0;
-    let cur = Math.max(0, depD[0] ?? firstKnown);
-    const arr = new Array<number>(n);
-    const dep = new Array<number>(n);
-    arr[0] = T.schedArr[0];
-    dep[0] = T.schedDep[0] + cur;
-    for (let i = 1; i < n; i++) {
-      const ad = arrD[i] ?? cur;
-      arr[i] = Math.max(T.schedArr[i] + ad, dep[i - 1] + 0.5);
-      if (i === n - 1) {
-        dep[i] = arr[i];
-        break;
-      }
-      // Ohne Meldung läuft die Verspätung unverändert weiter (GTFS-Realtime-Regel).
-      const dd = depD[i] ?? arr[i] - T.schedArr[i];
-      dep[i] = Math.max(arr[i], T.schedDep[i] + dd);
-      cur = dep[i] - T.schedDep[i];
-    }
-    // Beobachtet ist, was gemeldet wurde und bei der letzten Meldung schon vorbei war.
-    const observed = new Uint8Array(n);
-    for (let i = 0; i < n; i++) {
-      if (i > 0 && arrD[i] !== null && arr[i] <= seen + 1) observed[i] |= OBS_ARR;
-      if (i < n - 1 && depD[i] !== null && dep[i] <= seen + 1) observed[i] |= OBS_DEP;
-    }
-    return { arr, dep, causes, known: true, observed };
+    const R = observeTrip(T, data, midnight);
+    if (R.known === false) stats.unknown++;
+    else if (R.canceled) stats.canceled++;
+    else stats.known++;
+    return R;
   });
 
   const connectionOutcome = m.connections.map((c) => {

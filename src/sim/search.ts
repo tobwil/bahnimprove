@@ -29,7 +29,9 @@ export interface SearchResult {
   trips: TripHit[];
 }
 
-const LINE = /^(ice|ic|ec|ece|en|nj|rj|rjx|tgv|flx)?\s*(\d{1,5})$/;
+/** Linie oder Zugnummer: "ICE 28", "re4", "S 5", "28" */
+const LINE = /^([a-z]{1,4})?\s*(\d{1,5})$/;
+const lineKey = (line: string) => fold(line).replace(/\s/g, '');
 
 /** Bahnhöfe, deren Name alle Suchwörter enthält – wichtigste zuerst, Wortanfänge bevorzugt. */
 export function matchStations(m: DayModel, query: string | string[], limit = 6): number[] {
@@ -37,12 +39,12 @@ export function matchStations(m: DayModel, query: string | string[], limit = 6):
   if (!tokens.length) return [];
   const scored: { i: number; score: number }[] = [];
   m.stations.forEach((s, i) => {
-    if (s.weight < 1 || /\(Gr\)|Grenze/.test(s.name)) return;
+    if ((s.w ?? s.weight) < 1 || /\(Gr\)|Grenze/.test(s.name)) return;
     const n = fold(s.name);
     if (!tokens.every((t) => n.includes(t))) return;
     const pos = n.indexOf(tokens[0]);
     const wordStart = pos === 0 || n[pos - 1] === ' ';
-    scored.push({ i, score: s.weight * (pos === 0 ? 4 : wordStart ? 2 : 1) * (n.includes('hbf') ? 1.5 : 1) });
+    scored.push({ i, score: (s.weight * 5 + (s.w ?? 0) + 1) * (pos === 0 ? 4 : wordStart ? 2 : 1) * (n.includes('hbf') ? 1.5 : 1) });
   });
   return scored.sort((a, b) => b.score - a.score).slice(0, limit).map((x) => x.i);
 }
@@ -52,15 +54,17 @@ export function search(m: DayModel, r: SimResult, query: string, now: number): S
   if (!q) return { stations: [], trips: [] };
   const words = q.split(' ').filter((w) => w !== 'nach' && w !== 'von' && w !== 'bis');
 
-  // Linie oder Zugnummer ("ICE 28", "28")
+  // Linie oder Zugnummer ("ICE 28", "RE 4", "S5", "28") – nur wenn das Wort kein Bahnhof sein soll
   let lineCat: string | undefined, lineNo: string | undefined;
-  const joined = words.slice(0, 2).join(' ');
-  const lm = LINE.exec(joined) ?? LINE.exec(words[0] ?? '');
   let rest = words;
-  if (lm) {
-    lineCat = lm[1];
-    lineNo = lm[2];
-    rest = words.slice(LINE.exec(joined) && lm === LINE.exec(joined) && words.length >= 2 && /^\d/.test(words[1]) ? 2 : 1);
+  for (const take of [2, 1]) {
+    const lm = LINE.exec(words.slice(0, take).join(' '));
+    if (lm && (take === 1 || /^\d/.test(words[1]))) {
+      lineCat = lm[1];
+      lineNo = lm[2];
+      rest = words.slice(take);
+      break;
+    }
   }
 
   // Restliche Wörter als Bahnhöfe (mehrteilige Namen werden zusammengefasst)
@@ -81,8 +85,8 @@ export function search(m: DayModel, r: SimResult, query: string, now: number): S
   const trips: TripHit[] = [];
   for (const T of m.trips) {
     if (lineNo) {
-      const [cat, no] = T.line.toLowerCase().split(' ');
-      if (no !== lineNo || (lineCat && cat !== lineCat)) continue;
+      const key = lineKey(T.line);
+      if (lineCat ? key !== `${lineCat}${lineNo}` : !key.endsWith(lineNo) || /\d/.test(key.slice(-lineNo.length - 1, -lineNo.length))) continue;
     }
     // Bahnhöfe in Fahrtrichtung
     let stop = 0;
