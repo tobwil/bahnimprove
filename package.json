@@ -1,0 +1,24 @@
+{
+  "name": "bahnimprove",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Pixel-Leitstand für den deutschen Fernverkehr – Live-Karte, Verspätungen, Tagesbericht mit Dispositionsvorschlägen",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "data": "tsx scripts/build-timetable.ts && tsx scripts/build-map.ts"
+  },
+  "devDependencies": {
+    "@types/node": "22.9.0",
+    "@types/topojson-client": "3.1.5",
+    "tsx": "4.19.2",
+    "topojson-client": "3.1.0",
+    "typescript": "5.6.3",
+    "vite": "5.4.10",
+    "vitest": "2.1.4"
+  }
+}

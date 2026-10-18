@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Bahnimprove Leitstand</title>
+    <meta name="description" content="Pixel-Leitstand für den deutschen Fernverkehr: Live-Karte, Verspätungen und ein Tagesbericht mit Dispositionsvorschlägen." />
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 8 8' shape-rendering='crispEdges'%3E%3Crect width='8' height='8' fill='%23070b16'/%3E%3Crect x='1' y='2' width='6' height='3' fill='%234ade80'/%3E%3Crect x='2' y='3' width='1' height='1' fill='%23070b16'/%3E%3Crect x='5' y='3' width='1' height='1' fill='%23070b16'/%3E%3Crect x='1' y='6' width='6' height='1' fill='%238393ad'/%3E%3C/svg%3E" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Silkscreen:wght@400;700&family=VT323&display=swap" rel="stylesheet" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true"></span>
+        <div>
+          <h1>Bahnimprove</h1>
+          <p class="brand-sub">Leitstand Fernverkehr</p>
+        </div>
+      </div>
+      <div class="clock-wrap">
+        <div id="clock" class="clock">--:--</div>
+        <div id="clock-mode" class="clock-mode">LIVE</div>
+      </div>
+      <nav class="day-tabs" aria-label="Verkehrstag">
+        <button id="day-yesterday" class="pix-btn">Gestern</button>
+        <button id="day-today" class="pix-btn is-active">Heute</button>
+      </nav>
+      <button id="open-report" class="pix-btn pix-btn--primary">Tagesbericht</button>
+    </header>
+
+    <div class="notice" id="notice">
+      <strong>Fahrplan echt, Verspätungen simuliert.</strong>
+      Soll-Fahrplan aus dem offenen DB-Fernverkehrsfeed. Störungen und Verspätungen erzeugt die Simulation, bis ein Echtzeit-Zugang (DB Timetables API) angebunden ist.
+    </div>
+
+    <main class="layout">
+      <section class="map-wrap" aria-label="Karte">
+        <canvas id="map"></canvas>
+        <div id="tooltip" class="tooltip" hidden></div>
+        <div class="legend" aria-label="Legende">
+          <span><i style="--c: #4ade80"></i>pünktlich</span>
+          <span><i style="--c: #facc15"></i>+6</span>
+          <span><i style="--c: #fb923c"></i>+16</span>
+          <span><i style="--c: #f43f5e"></i>+31</span>
+        </div>
+        <div class="zoom-ctl">
+          <button id="zoom-in" class="pix-btn pix-btn--icon" aria-label="Hineinzoomen">+</button>
+          <button id="zoom-out" class="pix-btn pix-btn--icon" aria-label="Herauszoomen">−</button>
+          <button id="zoom-reset" class="pix-btn pix-btn--icon" aria-label="Ganz Deutschland">⌂</button>
+        </div>
+      </section>
+
+      <aside class="side">
+        <div class="kpis">
+          <div class="kpi"><span class="kpi-label">Pünktlichkeit</span><span id="kpi-punct" class="kpi-value">–</span><span class="kpi-hint">Ankünfte &lt; 6 Min</span></div>
+          <div class="kpi"><span class="kpi-label">Unterwegs</span><span id="kpi-active" class="kpi-value">–</span><span class="kpi-hint">Züge</span></div>
+          <div class="kpi"><span class="kpi-label">Ø Verspätung</span><span id="kpi-delay" class="kpi-value">–</span><span class="kpi-hint">Züge unterwegs</span></div>
+          <div class="kpi"><span class="kpi-label">Störungen</span><span id="kpi-incidents" class="kpi-value">–</span><span class="kpi-hint">aktiv</span></div>
+        </div>
+
+        <section class="panel" id="selection-panel" hidden>
+          <header class="panel-head"><h2 id="sel-title">Auswahl</h2><button id="sel-close" class="pix-btn pix-btn--icon" aria-label="Auswahl schließen">×</button></header>
+          <div id="selection"></div>
+        </section>
+
+        <section class="panel">
+          <header class="panel-head"><h2>Störungen jetzt</h2></header>
+          <ul id="incidents" class="list"></ul>
+        </section>
+
+        <section class="panel">
+          <header class="panel-head"><h2>Größte Verspätungen</h2></header>
+          <ul id="worst" class="list"></ul>
+        </section>
+      </aside>
+    </main>
+
+    <footer class="timebar">
+      <button id="play" class="pix-btn pix-btn--icon" aria-label="Pause">❚❚</button>
+      <div class="speeds" role="group" aria-label="Geschwindigkeit">
+        <button class="pix-btn" data-speed="1">1×</button>
+        <button class="pix-btn" data-speed="60">60×</button>
+        <button class="pix-btn" data-speed="300">300×</button>
+        <button class="pix-btn" data-speed="1200">1200×</button>
+      </div>
+      <input id="scrub" type="range" min="180" max="1620" step="1" aria-label="Uhrzeit" />
+      <button id="go-live" class="pix-btn pix-btn--live">● Live</button>
+      <p class="credits">Fahrplan: DELFI e.V. / gtfs.de (CC BY 4.0) · Karte: Natural Earth</p>
+    </footer>
+
+    <dialog id="report" class="report">
+      <div class="report-inner">
+        <header class="report-head">
+          <h2 id="report-title">Tagesbericht</h2>
+          <button id="report-close" class="pix-btn pix-btn--icon" aria-label="Schließen">×</button>
+        </header>
+        <div id="report-body"></div>
+      </div>
+    </dialog>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

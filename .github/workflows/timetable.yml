@@ -1,0 +1,32 @@
+name: Fahrplan aktualisieren
+
+# Täglich den Fernverkehrs-Fahrplan neu laden, damit "Gestern" und die nächsten 14 Tage abgedeckt sind.
+on:
+  schedule:
+    - cron: '17 2 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx tsx scripts/build-timetable.ts
+        env:
+          TZ: Europe/Berlin
+      - run: npm test
+      - name: Commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add public/data/timetable.json
+          git diff --cached --quiet || git commit -m "Fahrplan aktualisiert"
+          git push
