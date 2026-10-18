@@ -36,11 +36,12 @@ export class Sheet {
   }
 
   private bindDrag(handle: HTMLElement) {
-    let start: { y: number; top: number; t: number } | null = null;
+    let start: { y: number; top: number; base: number; t: number } | null = null;
     let moved = false;
     handle.addEventListener('pointerdown', (e) => {
       if (this.docked || (e.target as HTMLElement).closest('button')) return;
-      start = { y: e.clientY, top: this.el.getBoundingClientRect().top, t: performance.now() };
+      // base: Oberkante ohne Verschiebung (auf dem Handy sitzt das Sheet über der App-Navigation)
+      start = { y: e.clientY, top: this.el.getBoundingClientRect().top, base: this.el.offsetTop, t: performance.now() };
       moved = false;
       handle.setPointerCapture(e.pointerId);
     });
@@ -50,10 +51,9 @@ export class Sheet {
       if (!moved && Math.abs(dy) < 6) return;
       moved = true;
       this.el.classList.add('is-dragging');
-      const parent = this.el.offsetParent?.getBoundingClientRect().height ?? window.innerHeight;
-      const height = this.el.getBoundingClientRect().height;
-      const y = Math.min(parent - 120, Math.max(parent - height, start.top + dy));
-      this.el.style.transform = `translateY(${y - (parent - height)}px)`;
+      const height = this.el.offsetHeight;
+      const y = Math.min(start.base + height - 120, Math.max(start.base, start.top + dy));
+      this.el.style.transform = `translateY(${y - start.base}px)`;
     });
     const end = (e: PointerEvent) => {
       if (!start) return;

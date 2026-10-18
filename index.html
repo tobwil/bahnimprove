@@ -76,8 +76,9 @@
         <div class="sheet-body" id="sheet-body">
           <nav class="tabs" role="tablist" aria-label="Ansicht">
             <button class="tab is-active" role="tab" data-tab="now" aria-selected="true">Jetzt</button>
-            <button class="tab" role="tab" data-tab="search" aria-selected="false">Suche</button>
+            <button class="tab" role="tab" data-tab="board" aria-selected="false">Abfahrten</button>
             <button class="tab" role="tab" data-tab="trip" aria-selected="false">Reise</button>
+            <button class="tab" role="tab" data-tab="search" aria-selected="false">Suche</button>
             <button class="tab" role="tab" data-tab="analysis" aria-selected="false">Analyse</button>
           </nav>
 
@@ -94,6 +95,25 @@
               <h2 class="block-title">Größte Verspätungen</h2>
               <ul id="worst" class="rows"></ul>
             </section>
+          </div>
+
+          <div class="view" id="view-board" role="tabpanel" hidden>
+            <div class="board-pick">
+              <label class="search search--board">
+                <span class="visually-hidden">Bahnhof für die Abfahrtstafel</span>
+                <input id="board-input" type="search" placeholder="Bahnhof wählen …" autocomplete="off" enterkeyhint="search" />
+              </label>
+              <ul id="board-suggest" class="suggest" hidden></ul>
+            </div>
+            <div class="board-bar">
+              <div class="seg seg--solid" role="group" aria-label="Richtung">
+                <button id="board-dep" class="seg-btn is-active">Abfahrten</button>
+                <button id="board-arr" class="seg-btn">Ankünfte</button>
+              </div>
+            </div>
+            <div id="board-chips" class="chips"></div>
+            <div id="board"></div>
+            <p class="fine board-legend"><b>Prognose</b> = aktuelle Echtzeitmeldung des Zuges. <b>meist</b> = typische Verspätung dieser Linie an diesem Bahnhof aus den beobachteten Tagen, solange der Zug noch keine Echtzeitdaten sendet (bisher nur Fernverkehr). Gleisangaben enthalten die offenen Daten nicht.</p>
           </div>
 
           <div class="view" id="view-search" role="tabpanel" hidden>
@@ -153,6 +173,29 @@
           <p class="credits">Fahrplan &amp; Echtzeit: DELFI e.V. / gtfs.de (CC BY 4.0) · Karte: Natural Earth</p>
         </div>
       </aside>
+
+      <nav class="appnav" id="appnav" aria-label="Hauptnavigation">
+        <button class="appnav-btn is-active" data-tab="now" aria-current="page">
+          <svg viewBox="0 0 16 16" aria-hidden="true" shape-rendering="crispEdges"><path fill="currentColor" d="M5 1h6v1H5zM4 2h1v1H4zM11 2h1v1h-1zM3 3h1v5H3zM12 3h1v5h-1zM4 8h1v2H4zM11 8h1v2h-1zM5 10h1v2H5zM10 10h1v2h-1zM6 12h1v2H6zM9 12h1v2H9zM7 14h2v1H7zM7 5h2v2H7z"/></svg>
+          <span>Karte</span>
+        </button>
+        <button class="appnav-btn" data-tab="board">
+          <svg viewBox="0 0 16 16" aria-hidden="true" shape-rendering="crispEdges"><path fill="currentColor" d="M4 1h8v1H4zM3 2h1v9H3zM12 2h1v9h-1zM4 11h8v1H4zM5 3h6v3H5zM5 8h2v1H5zM9 8h2v1H9zM4 13h2v2H4zM10 13h2v2h-2z"/></svg>
+          <span>Abfahrten</span>
+        </button>
+        <button class="appnav-btn" data-tab="trip">
+          <svg viewBox="0 0 16 16" aria-hidden="true" shape-rendering="crispEdges"><path fill="currentColor" d="M2 1h4v4H2zM3 5h2v3H3zM3 8h9v2H3zM10 10h2v1h-2zM10 11h4v1h-4zM10 14h4v1h-4zM10 12h1v2h-1zM13 12h1v2h-1z"/></svg>
+          <span>Reise</span>
+        </button>
+        <button class="appnav-btn" data-tab="search">
+          <svg viewBox="0 0 16 16" aria-hidden="true" shape-rendering="crispEdges"><path fill="currentColor" d="M4 1h5v1H4zM2 2h2v1H2zM9 2h2v1H9zM1 3h1v6H1zM11 3h1v6h-1zM2 9h2v1H2zM9 9h2v1H9zM4 10h5v1H4zM10 10h2v2h-2zM12 12h2v2h-2z"/></svg>
+          <span>Suche</span>
+        </button>
+        <button class="appnav-btn" data-tab="analysis">
+          <svg viewBox="0 0 16 16" aria-hidden="true" shape-rendering="crispEdges"><path fill="currentColor" d="M1 14h14v1H1zM2 9h3v5H2zM6 5h3v9H6zM10 2h3v12h-3z"/></svg>
+          <span>Analyse</span>
+        </button>
+      </nav>
     </div>
 
     <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>

@@ -25,7 +25,7 @@ import { gradeOf, renderReport } from './ui/report.ts';
 import { MapGestures } from './ui/gestures.ts';
 import { Sheet } from './ui/sheet.ts';
 import { Timeline } from './ui/timeline.ts';
-import { emptyRow, hotspotRow, incidentRow, journeyCard, journeyVerdict, searchHitRow, stationBoard, stationRow, trainDetail, trainRow, type Buildup } from './ui/views.ts';
+import { emptyRow, hotspotRow, incidentRow, journeyCard, journeyVerdict, departureBoard, searchHitRow, stationRow, trainDetail, trainRow, type Buildup } from './ui/views.ts';
 import { aggregateDay, findings, mergeDays, type Insights } from './insights/aggregate.ts';
 import { searchJourneys, type JourneyResult } from './sim/journey.ts';
 import { matchStations, search } from './sim/search.ts';
@@ -34,6 +34,7 @@ import { aboutPage } from './ui/about.ts';
 
 /** Ab dieser Uhrzeit beginnt ein neuer Verkehrstag (Nachtzüge laufen über Mitternacht). */
 const DAY_ROLLOVER = 180;
+type Tab = 'now' | 'board' | 'trip' | 'search' | 'analysis';
 const REALTIME_POLL = 60_000;
 const SPEEDS = [1, 60, 300, 1200];
 
@@ -143,7 +144,10 @@ async function main() {
     time: serviceNow().minutes,
     selectedTrain: undefined as number | undefined,
     selectedStation: undefined as number | undefined,
-    tab: 'now' as 'now' | 'search' | 'trip' | 'analysis',
+    tab: 'now' as Tab,
+    /** Bahnhof der Abfahrtstafel */
+    boardStation: undefined as number | undefined,
+    boardMode: 'dep' as 'dep' | 'arr',
     user: undefined as { lat: number; lon: number } | undefined,
     hotspots: [] as LiveHotspot[],
   };
@@ -170,7 +174,8 @@ async function main() {
     const hud = document.querySelector<HTMLElement>('.hud')!.getBoundingClientRect();
     const stage = canvas.getBoundingClientRect();
     const peek = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--sheet-peek')) || 236;
-    map.setInsets(hud.bottom - stage.top + 4, sheet.docked ? 0 : peek);
+    const nav = $('appnav').offsetHeight;
+    map.setInsets(hud.bottom - stage.top + 4, sheet.docked ? 0 : peek + nav);
   };
   window.addEventListener('resize', layoutMap);
 
@@ -241,7 +246,7 @@ async function main() {
       const [mx, my] = map.toMapPixel(x, y);
       const hit = map.hitTest(mx, my);
       if (hit?.type === 'train') selectTrain(hit.id, false);
-      else if (hit?.type === 'station') selectStation(hit.id);
+      else if (hit?.type === 'station') selectStation(hit.id, true);
       else closeDetail();
     },
     hover: (x, y) => hover(x, y),
@@ -273,32 +278,43 @@ async function main() {
   }
 
   // --- Ansichten im Sheet ----------------------------------------------------
-  const views = { now: $('view-now'), search: $('view-search'), trip: $('view-trip'), analysis: $('view-analysis'), detail: $('view-detail') };
+  const views = { now: $('view-now'), board: $('view-board'), search: $('view-search'), trip: $('view-trip'), analysis: $('view-analysis'), detail: $('view-detail') };
   const showView = (v: keyof typeof views) => {
     for (const [k, el] of Object.entries(views)) el.hidden = k !== v;
     $('sheet').classList.toggle('is-detail', v === 'detail');
-    // Suche und Reise brauchen auf dem Handy den Platz für Eingaben und Ergebnisse
-    $('sheet').classList.toggle('is-compact', v === 'search' || v === 'trip');
+    // Suche, Reise und Tafel brauchen auf dem Handy den Platz für Eingaben und Ergebnisse
+    $('sheet').classList.toggle('is-compact', v === 'search' || v === 'trip' || v === 'board');
     document.querySelector<HTMLElement>('.tabs')!.hidden = v === 'detail';
   };
-  document.querySelectorAll<HTMLButtonElement>('.tab').forEach((b) =>
-    b.addEventListener('click', () => {
-      state.tab = b.dataset.tab as typeof state.tab;
-      document.querySelectorAll('.tab').forEach((t) => {
-        t.classList.toggle('is-active', t === b);
-        t.setAttribute('aria-selected', String(t === b));
-      });
-      closeDetail();
-      if (state.tab === 'search' || state.tab === 'trip') sheet.set('full');
+  const tabButtons = [...document.querySelectorAll<HTMLButtonElement>('.tab, .appnav-btn')];
+  /** Ansicht wechseln – gemeinsam für die Reiter im Sheet (Desktop) und die App-Navigation (Handy). */
+  function selectTab(tab: Tab, fromNav = false) {
+    const again = state.tab === tab && views.detail.hidden;
+    state.tab = tab;
+    for (const t of tabButtons) {
+      const on = t.dataset.tab === tab;
+      t.classList.toggle('is-active', on);
+      if (t.classList.contains('tab')) t.setAttribute('aria-selected', String(on));
+      else if (on) t.setAttribute('aria-current', 'page');
+      else t.removeAttribute('aria-current');
+    }
+    closeDetail();
+    if (tab === 'now') {
+      // "Karte": Sheet einklappen, nochmal tippen zeigt die Listen
+      if (fromNav) sheet.set(again && sheet.snap === 'peek' ? 'half' : 'peek');
       else if (sheet.snap === 'peek') sheet.set('half');
-      if (state.tab === 'search') {
-        renderSearch(true);
-        $<HTMLInputElement>('search').focus({ preventScroll: true });
-      }
-      if (state.tab === 'analysis') renderPanels(netTrains());
-      if (state.tab === 'trip' && !$<HTMLInputElement>('trip-time').value) $<HTMLInputElement>('trip-time').value = hhmm(state.time);
-    }),
-  );
+    } else if (tab === 'analysis') sheet.set(fromNav ? 'full' : sheet.snap === 'peek' ? 'half' : sheet.snap);
+    else sheet.set('full');
+    $('sheet-body').scrollTop = 0;
+    if (tab === 'search') {
+      renderSearch(true);
+      $<HTMLInputElement>('search').focus({ preventScroll: true });
+    }
+    if (tab === 'board') openBoard(state.boardStation ?? defaultBoardStation());
+    if (tab === 'analysis') renderPanels(netTrains());
+    if (tab === 'trip' && !$<HTMLInputElement>('trip-time').value) $<HTMLInputElement>('trip-time').value = hhmm(state.time);
+  }
+  for (const b of tabButtons) b.addEventListener('click', () => selectTab(b.dataset.tab as Tab, b.classList.contains('appnav-btn')));
 
   function selectTrain(trip: number, fromList: boolean) {
     state.selectedTrain = trip;
@@ -317,20 +333,19 @@ async function main() {
     }
   }
 
-  function selectStation(station: number) {
-    state.selectedStation = station;
-    state.selectedTrain = undefined;
-    showView('detail');
-    renderDetail(true);
-    $('sheet-body').scrollTop = 0;
-    if (sheet.snap === 'peek') sheet.set('half');
+  /** Bahnhof antippen (Karte, Suche, Nähe): Abfahrtstafel dieses Bahnhofs. */
+  function selectStation(station: number, fromMap = false) {
+    if (state.tab !== 'board') selectTab('board');
+    else closeDetail();
+    openBoard(station);
+    if (fromMap) sheet.set('half');
     const st = state.day.model.stations[station];
     requestAnimationFrame(() => map.ensureVisible(st.lon, st.lat, sheet.visibleHeight()));
-    void loadAround(st.lat, st.lon, 0).then(() => renderDetail(true));
   }
 
   function closeDetail() {
-    state.selectedTrain = state.selectedStation = undefined;
+    state.selectedTrain = undefined;
+    state.selectedStation = state.tab === 'board' ? state.boardStation : undefined;
     showView(state.tab);
   }
   $('detail-back').addEventListener('click', closeDetail);
@@ -372,8 +387,6 @@ async function main() {
     if (state.selectedTrain !== undefined) {
       const id = state.selectedTrain;
       setHtml('detail', trainDetail(m, r, id, trainAt(m, r, id, state.time), state.time, buildup(id)), force);
-    } else if (state.selectedStation !== undefined) {
-      setHtml('detail', stationBoard(m, r, state.selectedStation, state.time), force);
     }
   }
   $('detail').addEventListener('click', (e) => {
@@ -451,6 +464,8 @@ async function main() {
         renderNearby();
         void loadAround(state.user.lat, state.user.lon);
         const near = nearestStations(state.user, 1)[0];
+        if (!views.board.hidden && state.boardStation === undefined && near) openBoard(near.i);
+        else if (!views.board.hidden) renderBoardChips();
         const from = $<HTMLInputElement>('trip-from');
         if (near && !from.value) {
           from.value = state.day.model.stations[near.i].name;
@@ -481,6 +496,121 @@ async function main() {
       if (p.state === 'granted') locate(true);
     })
     .catch(() => {});
+
+  // --- Abfahrtstafel ------------------------------------------------------------
+  const RECENT_KEY = 'bahnimprove.board.recent';
+  /** Zuletzt gewählte Bahnhöfe (nur auf diesem Gerät, als Namen – die stabil über Fahrplanversionen sind) */
+  const loadRecent = (): string[] => {
+    try {
+      const v = JSON.parse(localStorage.getItem(RECENT_KEY) ?? '[]');
+      return Array.isArray(v) ? v.filter((x) => typeof x === 'string').slice(0, 4) : [];
+    } catch {
+      return [];
+    }
+  };
+  const saveRecent = (name: string) => {
+    try {
+      localStorage.setItem(RECENT_KEY, JSON.stringify([name, ...loadRecent().filter((x) => x !== name)].slice(0, 4)));
+    } catch {
+      // ohne Speicher eben ohne Verlauf
+    }
+  };
+  const stationByName = (name: string) => {
+    const i = state.day.model.stations.findIndex((s) => s.name === name);
+    return i < 0 ? undefined : i;
+  };
+  const BIG_STATIONS = ['Hamburg Hbf', 'Berlin Hbf', 'Köln Hbf', 'Frankfurt (Main) Hbf', 'München Hbf'];
+  /** Zuletzt benutzter Bahnhof, sonst der nächste zum Standort */
+  const defaultBoardStation = () => {
+    const recent = loadRecent().map(stationByName).find((i) => i !== undefined);
+    if (recent !== undefined) return recent;
+    return state.user ? nearestStations(state.user, 1)[0]?.i : undefined;
+  };
+  let boardLoading = false;
+  function openBoard(station: number | undefined, remember = false) {
+    state.boardStation = station;
+    if (!views.detail.hidden) showView('board');
+    state.selectedStation = station;
+    const input = $<HTMLInputElement>('board-input');
+    input.value = '';
+    input.placeholder = station === undefined ? 'Bahnhof wählen …' : `${state.day.model.stations[station].name} · anderer Bahnhof …`;
+    $('board-suggest').hidden = true;
+    if (station !== undefined) {
+      if (remember) saveRecent(state.day.model.stations[station].name);
+      const st = state.day.model.stations[station];
+      boardLoading = true;
+      void loadAround(st.lat, st.lon, 0).finally(() => {
+        boardLoading = false;
+        if (state.boardStation === station) renderBoard(true);
+      });
+    }
+    renderBoardChips();
+    renderBoard(true);
+  }
+  function renderBoardChips() {
+    const m = state.day.model;
+    const chips: { i: number; meta: string }[] = [];
+    const add = (i: number | undefined, meta = '') => i !== undefined && !chips.some((c) => c.i === i) && chips.push({ i, meta });
+    if (state.user) for (const x of nearestStations(state.user, 2)) add(x.i, x.d < 1 ? `${Math.round(x.d * 1000)} m` : `${x.d.toFixed(1).replace('.', ',')} km`);
+    for (const name of loadRecent()) add(stationByName(name));
+    if (chips.length < 3) for (const name of BIG_STATIONS) chips.length < 5 && add(stationByName(name));
+    const locate = state.user ? '' : `<button class="chip" data-locate>◎ In meiner Nähe</button>`;
+    setHtml(
+      'board-chips',
+      locate + chips.map((c) => `<button class="chip${c.i === state.boardStation ? ' is-active' : ''}" data-station="${c.i}">${esc(shortName(m.stations[c.i].name))}${c.meta ? `<span class="meta">${c.meta}</span>` : ''}</button>`).join(''),
+      true,
+    );
+  }
+  function renderBoard(force = false) {
+    const { model: m, result: r } = net();
+    if (state.boardStation === undefined) {
+      setHtml('board', `<div class="board"><p class="board-empty">Wähle einen Bahnhof oder teile deinen Standort – dann zeigt die Tafel die nächsten Abfahrten mit erwarteter Verspätung.</p></div>`, force);
+      return;
+    }
+    const typical = (station: string, line: string) => insights?.typical?.[`${station}|${line}`];
+    setHtml('board', departureBoard(m, r, state.boardStation, state.time, { mode: state.boardMode, live: state.day.mode === 'real', typical, loading: boardLoading }), force);
+  }
+  const boardInput = $<HTMLInputElement>('board-input');
+  const boardSuggest = $('board-suggest');
+  boardInput.addEventListener('input', () => {
+    const m = state.day.model;
+    const list = boardInput.value.trim() ? matchStations(m, boardInput.value.split(' '), 6) : [];
+    boardSuggest.innerHTML = list.map((i) => `<li data-station="${i}"><span>${esc(m.stations[i].name)}</span></li>`).join('');
+    boardSuggest.hidden = !list.length;
+  });
+  boardInput.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter') return;
+    const first = boardSuggest.querySelector<HTMLElement>('[data-station]');
+    if (first) {
+      openBoard(+first.dataset.station!, true);
+      boardInput.blur();
+    }
+  });
+  boardSuggest.addEventListener('pointerdown', (e) => {
+    const li = (e.target as HTMLElement).closest<HTMLElement>('[data-station]');
+    if (!li) return;
+    e.preventDefault();
+    openBoard(+li.dataset.station!, true);
+    boardInput.blur();
+  });
+  $('board-chips').addEventListener('click', (e) => {
+    const b = (e.target as HTMLElement).closest<HTMLElement>('[data-station], [data-locate]');
+    if (!b) return;
+    if (b.dataset.locate !== undefined) locate(false);
+    else openBoard(+b.dataset.station!, true);
+  });
+  for (const mode of ['dep', 'arr'] as const) {
+    $(`board-${mode}`).addEventListener('click', () => {
+      state.boardMode = mode;
+      $('board-dep').classList.toggle('is-active', mode === 'dep');
+      $('board-arr').classList.toggle('is-active', mode === 'arr');
+      renderBoard(true);
+    });
+  }
+  $('board').addEventListener('click', (e) => {
+    const row = (e.target as HTMLElement).closest<HTMLElement>('[data-trip]');
+    if (row) selectTrain(+row.dataset.trip!, true);
+  });
 
   // --- Verbindungssuche --------------------------------------------------------
   let tripFrom: number | undefined;
@@ -530,6 +660,7 @@ async function main() {
   });
   document.addEventListener('pointerdown', (e) => {
     if (!(e.target as HTMLElement).closest('.trip-form')) suggestEl.hidden = true;
+    if (!(e.target as HTMLElement).closest('.board-pick')) boardSuggest.hidden = true;
   });
   $('trip-swap').addEventListener('click', () => {
     const a = $<HTMLInputElement>('trip-from'), b = $<HTMLInputElement>('trip-to');
@@ -706,6 +837,7 @@ async function main() {
     setHtml('worst', top.length ? top.map((t) => trainRow(m, t)).join('') : emptyRow('Gerade kein Zug unterwegs.'));
 
     if (!views.search.hidden) renderSearch();
+    if (!views.board.hidden) renderBoard();
     if (!views.trip.hidden && lastJourneys) renderJourneys();
     if (state.user) renderNearby();
 
@@ -827,7 +959,7 @@ async function main() {
   if (isReportLink) {
     openInsights();
     void loadInsights().then(() => !overlay.hidden && insights && ($('report-body').innerHTML = insightsPage(insights)));
-  }
+  } else if (location.hash === '#abfahrten') selectTab('board');
   layoutMap();
   syncControls();
   renderPanels(netTrains());

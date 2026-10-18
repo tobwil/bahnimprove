@@ -97,6 +97,11 @@ export async function aggregateFor(date: string): Promise<DayAgg | null> {
 export async function buildMissingAggregates(): Promise<string[]> {
   const today = serviceDate();
   const done = new Set((await aggStore().list({ prefix: 'day/' })).blobs.map((b) => b.key.slice(4)));
+  // Ältere Verdichtungen ohne Abfahrtswerte einmal neu rechnen (für "meist +3" auf der Tafel)
+  for (const key of [...done]) {
+    const agg = (await aggStore().get(`day/${key}`, { type: 'json' })) as Partial<DayAgg> | null;
+    if (!agg?.departures) done.delete(key);
+  }
   const built: string[] = [];
   for (const { key } of (await store().list()).blobs) {
     if (!/^\d{8}$/.test(key) || key >= today || done.has(key)) continue;

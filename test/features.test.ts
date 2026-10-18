@@ -8,6 +8,7 @@ import { observedResult } from '../src/sim/real.ts';
 import { fold, matchStations, search } from '../src/sim/search.ts';
 import type { RealtimeDay } from '../src/realtime/types.ts';
 import type { Timetable } from '../src/sim/types.ts';
+import { departureBoard } from '../src/ui/views.ts';
 
 const tt = JSON.parse(readFileSync(new URL('../public/data/timetable.json', import.meta.url), 'utf8')) as Timetable;
 const date = tt.dates[2];
@@ -94,5 +95,38 @@ describe('Lessons learned', () => {
     for (const t of Object.values(rt.trips)) t.seen = 0; // letzte Meldung um Mitternacht → alles danach ist Prognose
     const agg = aggregateDay(m, observedResult(m, rt).result);
     expect(Object.keys(agg.sections).length).toBe(0);
+  });
+});
+
+describe('Abfahrtstafel', () => {
+  const koeln = st('Köln Hbf');
+
+  it('zeigt die nächsten Abfahrten in Fahrplanreihenfolge mit Ziel und Unterwegshalten', () => {
+    const html = departureBoard(m, r, koeln, 600, { mode: 'dep', live: false });
+    const times = [...html.matchAll(/<span class="dep-time"><b>(\d\d:\d\d)<\/b>/g)].map((x) => x[1]);
+    expect(times.length).toBeGreaterThan(3);
+    expect([...times].sort()).toEqual(times);
+    // Verspätete Züge mit früherer Planzeit stehen noch auf der Tafel, bis sie weg sind
+    expect(times[0] >= '09:00' && times[times.length - 1] <= '13:00').toBe(true);
+    expect(html).toContain('über ');
+    expect(html).toContain('Köln');
+  });
+
+  it('nimmt ohne Echtzeit die übliche Verspätung der Linie an diesem Bahnhof', () => {
+    // Keine Echtzeitdaten für irgendeinen Zug → alle Abfahrten "ohne Daten"
+    const unknown = { ...r, trips: r.trips.map((t) => ({ ...t, known: false })) };
+    const T = m.trips.find((t) => t.stops.indexOf(koeln) >= 0 && t.stops.indexOf(koeln) < t.stops.length - 1 && t.schedDep[t.stops.indexOf(koeln)] > 600)!;
+    const html = departureBoard(m, unknown, koeln, 600, {
+      mode: 'dep',
+      live: true,
+      typical: (station, line) => (station === 'Köln Hbf' && line === T.line ? [30, 4, 9] : undefined),
+    });
+    expect(html).toContain('<b>+4</b><small>meist</small>');
+    expect(html).toContain('planmäßig');
+  });
+
+  it('zeigt Ankünfte mit Herkunft', () => {
+    const html = departureBoard(m, r, koeln, 600, { mode: 'arr', live: false });
+    expect(html).toContain('<small>von </small>');
   });
 });

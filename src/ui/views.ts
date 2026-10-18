@@ -4,6 +4,7 @@ import type { TripHit } from '../sim/search.ts';
 import type { DayModel } from '../sim/model.ts';
 import { INCIDENT_LABEL, fmtDelay, hhmm, incidentPlace, shortName } from '../sim/text.ts';
 import type { Incident, SimResult } from '../sim/types.ts';
+import { OBS_ARR, OBS_DEP } from '../sim/real.ts';
 import { delayColor, esc } from './dom.ts';
 
 export const lineBadge = (m: DayModel, trip: number) => {
@@ -131,30 +132,125 @@ export function trainDetail(m: DayModel, r: SimResult, trip: number, s: TrainSta
     <ol class="stops">${stops}</ol>`;
 }
 
-export function stationBoard(m: DayModel, r: SimResult, station: number, now: number): string {
-  const deps: { trip: number; sched: number; act: number; to: string; known: boolean }[] = [];
+// --- Abfahrtstafel -------------------------------------------------------------
+
+/** Übliche Abfahrtsverspätung einer Linie an einem Bahnhof: [Abfahrten, Median, 80-%-Wert] */
+export type TypicalDelay = (station: string, line: string) => [number, number, number] | undefined;
+
+export interface BoardOptions {
+  mode: 'dep' | 'arr';
+  /** Echtzeitdaten (sonst Simulation) */
+  live: boolean;
+  typical?: TypicalDelay;
+  /** Regionalzüge für diesen Bahnhof werden noch geladen */
+  loading?: boolean;
+}
+
+const BOARD_WINDOW = 180;
+const BOARD_ROWS = 40;
+
+/** Bis zu drei wichtige Unterwegshalte (nach Zughalten pro Tag), in Fahrtrichtung. */
+function viaStops(m: DayModel, stops: number[]): string {
+  const ranked = stops.map((s, k) => ({ s, k, w: m.stations[s].w ?? m.stations[s].weight })).sort((a, b) => b.w - a.w).slice(0, 3);
+  return ranked
+    .sort((a, b) => a.k - b.k)
+    .map((x) => shortName(m.stations[x.s].name))
+    .join(' · ');
+}
+
+interface BoardStatus {
+  text: string;
+  sub: string;
+  c: string;
+  title?: string;
+  /** erwartete Zusatzminuten (für die Zusammenfassung) */
+  expect: number;
+  live: boolean;
+}
+
+function boardStatus(m: DayModel, r: SimResult, trip: number, i: number, station: number, o: BoardOptions): BoardStatus {
+  const T = m.trips[trip];
+  const R = r.trips[trip];
+  const dep = o.mode === 'dep';
+  if (R.canceled) return { text: 'fällt aus', sub: '', c: 'var(--bad)', expect: 0, live: true };
+  if (R.known !== false) {
+    const d = dep ? R.dep[i] - T.schedDep[i] : R.arr[i] - T.schedArr[i];
+    const seen = (R.observed?.[i] ?? 0) & (dep ? OBS_DEP : OBS_ARR);
+    return {
+      text: d >= 1 ? `+${Math.round(d)}` : 'pünktlich',
+      sub: !o.live ? 'Simulation' : seen ? (dep ? 'abgefahren' : 'angekommen') : 'Prognose',
+      c: delayColor(d),
+      expect: Math.max(0, d),
+      live: true,
+    };
+  }
+  // Keine Echtzeit (Zug noch nicht unterwegs): was diese Linie hier üblicherweise hat
+  const t = dep ? o.typical?.(m.stations[station].name, T.line) : undefined;
+  const title = t ? `${t[0]} Abfahrten beobachtet: meist +${t[1]} Min, jede fünfte +${t[2]} Min oder mehr` : undefined;
+  if (t && t[1] >= 2) return { text: `+${t[1]}`, sub: 'meist', c: 'color-mix(in srgb, var(--warn) 70%, var(--muted))', title, expect: t[1], live: false };
+  return { text: 'planmäßig', sub: t ? 'meist pünktlich' : '', c: 'var(--muted)', title, expect: 0, live: false };
+}
+
+/** Abfahrts- bzw. Ankunftstafel mit erwarteter Verspätung: live, sonst aus der Historie. */
+export function departureBoard(m: DayModel, r: SimResult, station: number, now: number, o: BoardOptions): string {
+  const dep = o.mode === 'dep';
+  const rows: { trip: number; i: number; sched: number; act: number }[] = [];
+  const seen = new Set<string>();
   for (const T of m.trips) {
     const i = T.stops.indexOf(station);
-    if (i < 0 || i === T.stops.length - 1) continue;
+    if (i < 0 || (dep ? i === T.stops.length - 1 : i === 0)) continue;
     const R = r.trips[T.id];
-    if (R.canceled) continue;
-    const act = R.dep[i];
-    if (act < now - 1 || T.schedDep[i] > now + 120) continue;
-    deps.push({ trip: T.id, sched: T.schedDep[i], act, to: shortName(m.stations[T.stops[T.stops.length - 1]].name), known: R.known !== false });
+    const sched = dep ? T.schedDep[i] : T.schedArr[i];
+    const act = R.canceled ? sched : dep ? R.dep[i] : R.arr[i];
+    if (act < now - 0.5 || sched > now + BOARD_WINDOW) continue;
+    // Manche Züge stehen in Fern- und Regionalfeed
+    const key = `${T.line}|${sched}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    rows.push({ trip: T.id, i, sched, act });
   }
-  deps.sort((a, b) => a.sched - b.sched);
-  const rows = deps
-    .slice(0, 16)
-    .map((d) => {
-      const late = d.act - d.sched;
-      const cls = !d.known ? '' : late >= 6 ? 'late' : 'ok';
-      return `<tr data-trip="${d.trip}"><td>${hhmm(d.sched)}</td><td>${esc(m.trips[d.trip].line)}</td><td class="dest">${esc(d.to)}</td><td class="${cls}">${d.known ? (late >= 1 ? `+${Math.round(late)}` : 'pünktl.') : ''}</td></tr>`;
+  rows.sort((a, b) => a.sched - b.sched || a.trip - b.trip);
+  const shown = rows.slice(0, BOARD_ROWS);
+  const status = shown.map((x) => boardStatus(m, r, x.trip, x.i, station, o));
+
+  const html = shown
+    .map((x, k) => {
+      const T = m.trips[x.trip];
+      const s = status[k];
+      const end = dep ? T.stops[T.stops.length - 1] : T.stops[0];
+      const via = dep ? T.stops.slice(x.i + 1, -1) : T.stops.slice(1, x.i);
+      const late = s.live && s.expect >= 1 && !r.trips[x.trip].canceled;
+      return `<li class="dep${r.trips[x.trip].canceled ? ' is-canceled' : ''}" data-trip="${x.trip}">
+        <span class="dep-time"><b>${hhmm(x.sched)}</b>${late ? `<span style="color:${s.c}">${hhmm(x.act)}</span>` : ''}</span>
+        <span class="dep-main">
+          <span class="dep-head">${lineBadge(m, x.trip)}<span class="dep-dest">${dep ? '' : '<small>von </small>'}${esc(shortName(m.stations[end].name))}</span></span>
+          ${via.length ? `<span class="dep-via">${dep ? 'über ' : ''}${esc(viaStops(m, via))}</span>` : ''}
+        </span>
+        <span class="dep-status" style="--c:${s.c}"${s.title ? ` title="${esc(s.title)}"` : ''}><b>${s.text}</b>${s.sub ? `<small>${s.sub}</small>` : ''}</span>
+      </li>`;
     })
     .join('');
+
+  const hour = shown.filter((x) => x.sched <= now + 60);
+  const hourLate = hour.filter((x) => status[shown.indexOf(x)].expect >= 5).length;
+  const hourLive = hour.filter((x) => status[shown.indexOf(x)].live).length;
+  const canceled = shown.filter((x) => r.trips[x.trip].canceled).length;
+  const summary = hour.length
+    ? `${hour.length} ${dep ? (hour.length === 1 ? 'Abfahrt' : 'Abfahrten') : hour.length === 1 ? 'Ankunft' : 'Ankünfte'} in der nächsten Stunde · ${
+        hourLate ? `<b style="color:var(--late)">${hourLate} voraussichtlich 5+ Min später</b>` : '<b style="color:var(--ok)">alles im Plan</b>'
+      }${canceled ? ` · <b style="color:var(--bad)">${canceled} ${canceled === 1 ? 'Ausfall' : 'Ausfälle'}</b>` : ''} · Live-Daten für ${hourLive}`
+    : '';
+
   return `<div class="board">
-    <p class="board-title">${esc(shortName(m.stations[station].name))}</p>
-    ${rows ? `<table><tbody>${rows}</tbody></table>` : '<p class="fine">Keine Fernverkehrsabfahrten in den nächsten zwei Stunden.</p>'}
-  </div>`;
+    <div class="board-top"><p class="board-title">${esc(shortName(m.stations[station].name))}</p><span class="board-clock">${hhmm(now)}</span></div>
+    ${summary ? `<p class="board-summary">${summary}</p>` : ''}
+    ${
+      html
+        ? `<ul class="deps">${html}</ul>`
+        : `<p class="board-empty">${o.loading ? 'Lade Züge für diesen Bahnhof …' : `Keine ${dep ? 'Abfahrten' : 'Ankünfte'} in den nächsten drei Stunden.`}</p>`
+    }
+  </div>
+  ${o.loading && html ? '<p class="fine">Regionalzüge werden noch geladen …</p>' : ''}`;
 }
 
 // --- Suche -------------------------------------------------------------------

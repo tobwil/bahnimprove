@@ -82,11 +82,13 @@ export interface DayAgg {
   transfers: Record<string, TransferStat>;
   /** Pünktlichkeit je Linie */
   lines: Record<string, { arrivals: number; punctual: number }>;
+  /** Abfahrtsverspätung je "Bahnhof|Linie" – für "meist +3" auf der Abfahrtstafel */
+  departures: Record<string, Stat>;
 }
 
 /** Verdichtet einen Tag. Nur beobachtete Werte zählen; Prognosen und Fahrten ohne Daten fallen weg. */
 export function aggregateDay(m: DayModel, r: SimResult): DayAgg {
-  const agg: DayAgg = { date: m.date, trips: 0, arrivals: 0, punctual: 0, sections: {}, dwell: {}, origins: {}, imports: {}, transfers: {}, lines: {} };
+  const agg: DayAgg = { date: m.date, trips: 0, arrivals: 0, punctual: 0, sections: {}, dwell: {}, origins: {}, imports: {}, transfers: {}, lines: {}, departures: {} };
   const name = (s: number) => m.stations[s].name;
   for (const T of m.trips) {
     const R = r.trips[T.id];
@@ -118,6 +120,7 @@ export function aggregateDay(m: DayModel, r: SimResult): DayAgg {
       }
     }
     for (let i = 0; i + 1 < n; i++) {
+      if (obs[i] & OBS_DEP) add((agg.departures[`${name(T.stops[i])}|${T.line}`] ??= emptyStat()), R.dep[i] - T.schedDep[i], PUNCTUAL_LIMIT);
       // Fahrzeit-Abweichung auf dem Abschnitt
       if (obs[i] & OBS_DEP && obs[i + 1] & OBS_ARR) {
         const dev = R.arr[i + 1] - R.dep[i] - (T.schedArr[i + 1] - T.schedDep[i]);
@@ -161,7 +164,7 @@ export interface MultiAgg extends Omit<DayAgg, 'date'> {
 }
 
 export function mergeDays(days: DayAgg[]): MultiAgg {
-  let out: MultiAgg = { dates: [], trips: 0, arrivals: 0, punctual: 0, sections: {}, dwell: {}, origins: {}, imports: {}, transfers: {}, lines: {} };
+  let out: MultiAgg = { dates: [], trips: 0, arrivals: 0, punctual: 0, sections: {}, dwell: {}, origins: {}, imports: {}, transfers: {}, lines: {}, departures: {} };
   for (const d of days) {
     out = {
       dates: [...out.dates, d.date],
@@ -174,6 +177,8 @@ export function mergeDays(days: DayAgg[]): MultiAgg {
       imports: mergeRecord(out.imports, d.imports, (x, y) => ({ ...mergeStat(x, y), from: mergeCounts(x.from, y.from) })),
       transfers: mergeRecord(out.transfers, d.transfers, (x, y) => ({ n: x.n + y.n, missed: x.missed + y.missed, buffer: x.buffer + y.buffer, days: x.days + y.days, daysHit: x.daysHit + y.daysHit })),
       lines: mergeRecord(out.lines, d.lines, (x, y) => ({ arrivals: x.arrivals + y.arrivals, punctual: x.punctual + y.punctual })),
+      // Ältere Tagesverdichtungen haben noch keine Abfahrtswerte
+      departures: mergeRecord(out.departures, d.departures ?? {}, mergeStat),
     };
   }
   return out;
@@ -219,6 +224,8 @@ export interface Insights {
   reasons?: ReasonSummary;
   /** Bisherige Umstiege "Bahnhof|Zubringer|Anschluss" → [beobachtet, verpasst] – für die Reiseplanung */
   transferHistory: Record<string, [number, number]>;
+  /** Übliche Abfahrtsverspätung "Bahnhof|Linie" → [Abfahrten, Median, 80-%-Wert] in Minuten */
+  typical: Record<string, [number, number, number]>;
 }
 
 /** Belastbar = genug Fälle, genug Tage und das Problem tritt an der Mehrzahl der Tage auf (keine Einzelstörung). */
@@ -386,5 +393,6 @@ export function findings(agg: MultiAgg, opts: { minN?: number; reasons?: ReasonS
     preliminary: days < 3,
     reasons: opts.reasons,
     transferHistory: Object.fromEntries(Object.entries(agg.transfers).filter(([, t]) => t.n >= 3).map(([k, t]) => [k, [t.n, t.missed]])),
+    typical: Object.fromEntries(Object.entries(agg.departures).filter(([, d]) => d.n >= 5).map(([k, d]) => [k, [d.n, quantile(d, 0.5), quantile(d, 0.8)]])),
   };
 }
