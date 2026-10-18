@@ -15,6 +15,25 @@ Pixel-Leitstand für den deutschen Fernverkehr: eine Live-Karte aller ICE/IC/EC-
   - Umschaltbares Ziel: **Pünktlichkeit** (DB-Kennzahl) oder **Fahrgäste** (Menschen statt Züge)
   - Ursachenanteile, teuerste Störungen, Knoten mit dem größten Verspätungszuwachs, „Verspätungs-Verbreiter“
 
+### Für Fahrgäste
+
+- **Suche** über alle Fernverkehrsfahrten des Tages: Linie („ICE 28“), Bahnhof („Köln“, auch ohne Umlaute) oder Strecke („Köln München“).
+- **Standort** mit einem Tipp. Danach zeigt die App den nächsten Bahnhof mit Abfahrtstafel und trägt ihn als Start der Reise ein. Wer einmal zugestimmt hat, wird beim nächsten Besuch automatisch gefunden.
+- **Reise**: Verbindungssuche im Fernverkehr mit bis zu zwei Umstiegen. Für jeden Umstieg schätzt die App aus der aktuellen Verspätung, wie wahrscheinlich er klappt. Empfohlen wird die Verbindung mit der besten *erwarteten* Ankunft, also unter Berücksichtigung, dass ein Umstieg platzen kann.
+
+### Lessons learned für die DB
+
+`src/insights/aggregate.ts` verdichtet jeden Tag ausschließlich **beobachtete** Ist-Werte (keine Prognosen) und addiert sie über bis zu 28 Tage:
+
+- Fahrzeitverluste je Abschnitt → „Fahrzeit ehrlich planen oder Ursache beheben“
+- Haltezeit-Überschreitungen je Bahnhof → „Haltezeit/Fahrgastwechsel“
+- Verspätete Starts je Startbahnhof → „Bereitstellung prüfen“
+- Platzende Umstiege → „Übergangszeit oder Anschlusssicherung“
+- Mitgebrachte Verspätung aus dem Ausland
+- Abschnitte mit regelmäßiger Aufholung → „Hier steckt Reserve“
+
+Ein Befund ist **belastbar** ab 40 Fällen aus mindestens 7 Tagen, und nur wenn er an der Mehrzahl der Tage auftritt (Dauerproblem statt Einzelstörung). Die Function `build-insights` verdichtet jede Nacht den abgeschlossenen Tag, `GET /api/insights` liefert das Ergebnis.
+
 ## Starten
 
 ```bash

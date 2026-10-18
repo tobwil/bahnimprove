@@ -1,4 +1,6 @@
+import type { Journey, JourneyResult } from '../sim/journey.ts';
 import type { LiveHotspot, TrainState } from '../sim/live.ts';
+import type { TripHit } from '../sim/search.ts';
 import type { DayModel } from '../sim/model.ts';
 import { INCIDENT_LABEL, fmtDelay, hhmm, incidentPlace, shortName } from '../sim/text.ts';
 import type { Incident, SimResult } from '../sim/types.ts';
@@ -153,4 +155,84 @@ export function stationBoard(m: DayModel, r: SimResult, station: number, now: nu
     <p class="board-title">${esc(shortName(m.stations[station].name))}</p>
     ${rows ? `<table><tbody>${rows}</tbody></table>` : '<p class="fine">Keine Fernverkehrsabfahrten in den nächsten zwei Stunden.</p>'}
   </div>`;
+}
+
+// --- Suche -------------------------------------------------------------------
+
+export function stationRow(m: DayModel, station: number, distanceKm?: number): string {
+  const st = m.stations[station];
+  return `<li class="row" data-station="${station}">
+    <span class="pin" style="--c:var(--lamp)">◆</span>
+    <span class="row-main"><span class="row-title">${esc(st.name)}</span><span class="row-sub">${distanceKm !== undefined ? `${distanceKm < 1 ? `${Math.round(distanceKm * 1000)} m` : `${distanceKm.toFixed(1).replace('.', ',')} km`} entfernt · ` : ''}Abfahrtstafel öffnen</span></span>
+    <span></span>
+  </li>`;
+}
+
+export function searchHitRow(m: DayModel, r: SimResult, hit: TripHit): string {
+  const T = m.trips[hit.trip];
+  const R = r.trips[hit.trip];
+  const at = shortName(m.stations[T.stops[hit.stop]].name);
+  const d = hit.stop === T.stops.length - 1 ? R.arr[hit.stop] - T.schedArr[hit.stop] : R.dep[hit.stop] - T.schedDep[hit.stop];
+  const known = R.known !== false;
+  const status = R.canceled ? 'fällt aus' : hit.status === 'running' ? 'unterwegs' : hit.status === 'upcoming' ? 'kommt noch' : 'angekommen';
+  const c = R.canceled ? 'var(--bad)' : known ? delayColor(d) : 'var(--nodata)';
+  return `<li class="row" data-trip="${hit.trip}">
+    ${lineBadge(m, hit.trip)}
+    <span class="row-main"><span class="row-title">${esc(endpoints(m, hit.trip))}</span><span class="row-sub">${hit.stop === 0 ? 'ab' : 'in'} ${esc(at)} ${hhmm(hit.time)} · ${status}</span></span>
+    <span class="delay" style="--c:${c}">${R.canceled ? '✕' : known ? fmtDelay(d) : '–'}</span>
+  </li>`;
+}
+
+// --- Verbindungen ------------------------------------------------------------
+
+const chanceColor = (p: number) => (p >= 0.9 ? 'var(--ok)' : p >= 0.7 ? '#a3e635' : p >= 0.4 ? 'var(--warn)' : 'var(--bad)');
+export const chanceLabel = (p: number) => (p >= 0.9 ? 'sicher' : p >= 0.7 ? 'wahrscheinlich' : p >= 0.4 ? 'knapp' : p >= 0.1 ? 'riskant' : 'kaum zu schaffen');
+
+const duration = (min: number) => `${Math.floor(min / 60)}:${String(Math.round(min % 60)).padStart(2, '0')} h`;
+
+export function journeyCard(m: DayModel, j: Journey, recommended: boolean, now: number): string {
+  const late = j.predArr - j.schedArr;
+  const legs = j.legs
+    .map((l, i) => {
+      const T = m.trips[l.trip];
+      const via = i < j.legs.length - 1 ? `<span>→ ${esc(shortName(m.stations[T.stops[l.to]].name))} →</span>` : '';
+      return `<span class="line-badge" data-cat="${esc(T.category)}" data-trip="${l.trip}" role="button" tabindex="0">${esc(T.line)}</span>${via}`;
+    })
+    .join('');
+  const transfers = j.transfers
+    .map((t) => {
+      const c = chanceColor(t.probability);
+      const pred = Math.round(t.predicted);
+      return `<div class="chance" style="--c:${c}">
+        <span>Umstieg ${esc(shortName(m.stations[t.station].name))}: geplant ${Math.round(t.planned)} Min, ${t.uncertain ? 'ohne Echtzeitdaten' : `heute ${pred < 0 ? `${-pred} Min zu spät` : `${pred} Min`}`} (nötig ${t.needed})</span>
+        <b>${Math.round(t.probability * 100)} % · ${chanceLabel(t.probability)}</b>
+        <span class="chance-bar"><span style="width:${Math.max(3, t.probability * 100)}%"></span></span>
+      </div>`;
+    })
+    .join('');
+  const past = j.predDep < now - 0.5;
+  return `<article class="journey${recommended ? ' is-recommended' : ''}${past ? ' is-past' : ''}">
+    <div class="journey-top">
+      <span class="journey-times">${hhmm(j.schedDep)} → ${hhmm(j.schedArr)}${!j.canceled && late >= 1 ? `<small style="color:${delayColor(late)}">+${Math.round(late)}</small>` : ''}</span>
+      ${recommended ? '<span class="pill" style="--c:var(--lamp)">Empfohlen</span>' : j.canceled ? '<span class="pill" style="--c:var(--bad)">Fällt aus</span>' : ''}
+    </div>
+    <div class="journey-meta">${duration(j.schedArr - j.schedDep)} · ${j.legs.length === 1 ? 'direkt' : `${j.legs.length - 1} Umstieg${j.legs.length > 2 ? 'e' : ''}`}${!j.canceled && late >= 1 ? ` · Ankunft voraussichtlich ${hhmm(j.predArr)}` : ''}</div>
+    <div class="journey-legs">${legs}</div>
+    ${transfers}
+  </article>`;
+}
+
+export function journeyVerdict(m: DayModel, res: JourneyResult): string {
+  const { journeys, recommended } = res;
+  if (recommended < 0) return '';
+  const rec = journeys[recommended];
+  const earliest = journeys.findIndex((j) => !j.canceled && j.predDep >= rec.predDep - 120 && j.schedArr < rec.schedArr);
+  const recText = `${hhmm(rec.schedDep)} mit ${rec.legs.map((l) => m.trips[l.trip].line).join(' → ')}`;
+  if (earliest >= 0 && earliest !== recommended) {
+    const fast = journeys[earliest];
+    const weak = fast.transfers.reduce((a, b) => (b.probability < a.probability ? b : a), fast.transfers[0]);
+    return `<div class="verdict"><strong>Nimm lieber ${esc(recText)}.</strong>Die planmäßig schnellere Verbindung um ${hhmm(fast.schedDep)} ist heute ${fast.canceled ? 'ausgefallen' : `riskant: Der Umstieg in ${esc(shortName(m.stations[weak.station].name))} klappt nur zu ${Math.round(weak.probability * 100)} %`}. Voraussichtliche Ankunft mit der Empfehlung: ${hhmm(rec.predArr)}.</div>`;
+  }
+  const tr = rec.transfers.length ? ` Umstieg${rec.transfers.length > 1 ? 'e' : ''} ${rec.transfers.map((t) => `${shortName(m.stations[t.station].name)} ${Math.round(t.probability * 100)} %`).join(', ')}.` : ' Ohne Umstieg.';
+  return `<div class="verdict"><strong>${esc(recText)} passt.</strong>Voraussichtliche Ankunft ${hhmm(rec.predArr)}.${esc(tr)}</div>`;
 }

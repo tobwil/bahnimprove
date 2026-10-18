@@ -1,12 +1,5 @@
 import type { Config } from '@netlify/functions';
-import { collect, store } from '../realtime-store.mts';
-
-/** Verkehrstag (YYYYMMDD) in Berlin; bis 03:00 zählt noch der Vortag. */
-function serviceDate(now = new Date()): string {
-  const berlin = new Date(now.toLocaleString('en-US', { timeZone: 'Europe/Berlin' }));
-  if (berlin.getHours() < 3) berlin.setDate(berlin.getDate() - 1);
-  return `${berlin.getFullYear()}${String(berlin.getMonth() + 1).padStart(2, '0')}${String(berlin.getDate()).padStart(2, '0')}`;
-}
+import { collect, serviceDate, store } from '../realtime-store.mts';
 
 /** GET /api/realtime?date=YYYYMMDD – gesammelte Echtzeitdaten eines Verkehrstags. */
 export default async (req: Request) => {

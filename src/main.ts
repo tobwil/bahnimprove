@@ -13,7 +13,11 @@ import type { MapData } from './ui/mapdata.ts';
 import { gradeOf, renderReport } from './ui/report.ts';
 import { Sheet } from './ui/sheet.ts';
 import { Timeline } from './ui/timeline.ts';
-import { emptyRow, hotspotRow, incidentRow, stationBoard, trainDetail, trainRow, type Buildup } from './ui/views.ts';
+import { emptyRow, hotspotRow, incidentRow, journeyCard, journeyVerdict, searchHitRow, stationBoard, stationRow, trainDetail, trainRow, type Buildup } from './ui/views.ts';
+import { aggregateDay, findings, mergeDays, type Insights } from './insights/aggregate.ts';
+import { searchJourneys, type JourneyResult } from './sim/journey.ts';
+import { matchStations, search } from './sim/search.ts';
+import { insightsPage, insightsTeaser } from './ui/insights.ts';
 
 /** Ab dieser Uhrzeit beginnt ein neuer Verkehrstag (Nachtzüge laufen über Mitternacht). */
 const DAY_ROLLOVER = 180;
@@ -108,7 +112,8 @@ async function main() {
     time: serviceNow().minutes,
     selectedTrain: undefined as number | undefined,
     selectedStation: undefined as number | undefined,
-    tab: 'now' as 'now' | 'trains' | 'report',
+    tab: 'now' as 'now' | 'search' | 'trip' | 'analysis',
+    user: undefined as { lat: number; lon: number } | undefined,
     hotspots: [] as LiveHotspot[],
   };
 
@@ -275,10 +280,12 @@ async function main() {
   }
 
   // --- Ansichten im Sheet ----------------------------------------------------
-  const views = { now: $('view-now'), trains: $('view-trains'), report: $('view-report'), detail: $('view-detail') };
+  const views = { now: $('view-now'), search: $('view-search'), trip: $('view-trip'), analysis: $('view-analysis'), detail: $('view-detail') };
   const showView = (v: keyof typeof views) => {
     for (const [k, el] of Object.entries(views)) el.hidden = k !== v;
     $('sheet').classList.toggle('is-detail', v === 'detail');
+    // Suche und Reise brauchen auf dem Handy den Platz für Eingaben und Ergebnisse
+    $('sheet').classList.toggle('is-compact', v === 'search' || v === 'trip');
     document.querySelector<HTMLElement>('.tabs')!.hidden = v === 'detail';
   };
   document.querySelectorAll<HTMLButtonElement>('.tab').forEach((b) =>
@@ -289,7 +296,14 @@ async function main() {
         t.setAttribute('aria-selected', String(t === b));
       });
       closeDetail();
-      if (sheet.snap === 'peek') sheet.set('half');
+      if (state.tab === 'search' || state.tab === 'trip') sheet.set('full');
+      else if (sheet.snap === 'peek') sheet.set('half');
+      if (state.tab === 'search') {
+        renderSearch(true);
+        $<HTMLInputElement>('search').focus({ preventScroll: true });
+      }
+      if (state.tab === 'analysis') renderPanels(trainsAt(state.day.model, state.day.result, state.time));
+      if (state.tab === 'trip' && !$<HTMLInputElement>('trip-time').value) $<HTMLInputElement>('trip-time').value = hhmm(state.time);
     }),
   );
 
@@ -382,8 +396,210 @@ async function main() {
   };
   $('incidents').addEventListener('click', onRowClick);
   $('worst').addEventListener('click', onRowClick);
-  $('train-list').addEventListener('click', onRowClick);
-  $<HTMLInputElement>('search').addEventListener('input', () => renderPanels(trainsAt(state.day.model, state.day.result, state.time)));
+  $('search-results').addEventListener('click', onRowClick);
+  $('nearby').addEventListener('click', onRowClick);
+  $<HTMLInputElement>('search').addEventListener('input', () => renderSearch(true));
+
+  // --- Suche -------------------------------------------------------------------
+  function renderSearch(force = false) {
+    const m = state.day.model, r = state.day.result;
+    const q = $<HTMLInputElement>('search').value;
+    if (!q.trim()) {
+      setHtml('search-results', emptyRow('Linie (ICE 28), Bahnhof (Köln) oder Strecke (Köln München) eingeben.'), force);
+      return;
+    }
+    const res = search(m, r, q, state.time);
+    const html = res.stations.map((st) => stationRow(m, st)).join('') + res.trips.map((h) => searchHitRow(m, r, h)).join('');
+    setHtml('search-results', html || emptyRow('Nichts gefunden. Tipp: Bahnhofsname ohne „Hbf“ oder nur die Liniennummer.'), force);
+  }
+
+  // --- Standort ----------------------------------------------------------------
+  const toastEl = $('toast');
+  let toastTimer = 0;
+  const toast = (text: string) => {
+    toastEl.textContent = text;
+    toastEl.hidden = false;
+    clearTimeout(toastTimer);
+    toastTimer = window.setTimeout(() => (toastEl.hidden = true), 4500);
+  };
+  const distKm = (a: { lat: number; lon: number }, b: { lat: number; lon: number }) => Math.hypot((a.lat - b.lat) * 111.3, (a.lon - b.lon) * 111.3 * Math.cos((a.lat * Math.PI) / 180));
+  const nearestStations = (p: { lat: number; lon: number }, n = 3) =>
+    state.day.model.stations
+      .map((s, i) => ({ i, d: distKm(p, s), w: s.weight }))
+      .filter((x) => x.w >= 20 && !/\(Gr\)|Grenze/.test(state.day.model.stations[x.i].name))
+      .sort((a, b) => a.d - b.d)
+      .slice(0, n);
+  function renderNearby() {
+    if (!state.user) return;
+    $('nearby-block').hidden = false;
+    setHtml('nearby', nearestStations(state.user).map((x) => stationRow(state.day.model, x.i, x.d)).join(''), true);
+  }
+  const locateBtn = $('locate');
+  function locate(silent: boolean) {
+    if (!('geolocation' in navigator)) {
+      if (!silent) toast('Dein Gerät stellt keinen Standort bereit.');
+      return;
+    }
+    locateBtn.classList.add('is-busy');
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        locateBtn.classList.remove('is-busy');
+        locateBtn.classList.add('is-active');
+        state.user = { lat: pos.coords.latitude, lon: pos.coords.longitude };
+        renderNearby();
+        const near = nearestStations(state.user, 1)[0];
+        const from = $<HTMLInputElement>('trip-from');
+        if (near && !from.value) {
+          from.value = state.day.model.stations[near.i].name;
+          tripFrom = near.i;
+        }
+        if (!silent) {
+          map.ensureVisible(state.user.lon, state.user.lat, sheet.visibleHeight(), 3);
+          if (near) toast(`Nächster Fernverkehrsbahnhof: ${state.day.model.stations[near.i].name} (${near.d < 1 ? `${Math.round(near.d * 1000)} m` : `${near.d.toFixed(1).replace('.', ',')} km`})`);
+        }
+      },
+      (err) => {
+        locateBtn.classList.remove('is-busy');
+        if (silent) return;
+        toast(
+          err.code === err.PERMISSION_DENIED
+            ? 'Standort ist blockiert. Erlaube ihn in den Browser-Einstellungen für diese Seite und tippe erneut auf den Knopf.'
+            : 'Standort gerade nicht verfügbar. Versuch es draußen oder mit WLAN noch einmal.',
+        );
+      },
+      { enableHighAccuracy: false, timeout: 10000, maximumAge: 300000 },
+    );
+  }
+  locateBtn.addEventListener('click', () => locate(false));
+  // Wer schon einmal zugestimmt hat, wird ohne erneute Nachfrage gefunden.
+  navigator.permissions
+    ?.query({ name: 'geolocation' as PermissionName })
+    .then((p) => {
+      if (p.state === 'granted') locate(true);
+    })
+    .catch(() => {});
+
+  // --- Verbindungssuche --------------------------------------------------------
+  let tripFrom: number | undefined;
+  let tripTo: number | undefined;
+  let lastJourneys: JourneyResult | null = null;
+  const suggestEl = $('trip-suggest');
+  let suggestFor: 'from' | 'to' | null = null;
+  const showSuggest = (which: 'from' | 'to') => {
+    const input = $<HTMLInputElement>(which === 'from' ? 'trip-from' : 'trip-to');
+    const m = state.day.model;
+    const list = matchStations(m, input.value.split(' '), 6);
+    suggestFor = which;
+    const near = state.user && which === 'from' && !input.value.trim() ? nearestStations(state.user, 3) : [];
+    const items = near.length ? near.map((x) => ({ i: x.i, meta: `${x.d.toFixed(1).replace('.', ',')} km` })) : list.map((i) => ({ i, meta: '' }));
+    suggestEl.innerHTML = items.map((x) => `<li data-station="${x.i}"><span>${esc(m.stations[x.i].name)}</span><span class="meta">${x.meta}</span></li>`).join('');
+    suggestEl.hidden = !items.length;
+  };
+  for (const which of ['from', 'to'] as const) {
+    const input = $<HTMLInputElement>(which === 'from' ? 'trip-from' : 'trip-to');
+    input.addEventListener('input', () => {
+      if (which === 'from') tripFrom = undefined;
+      else tripTo = undefined;
+      showSuggest(which);
+    });
+    input.addEventListener('focus', () => {
+      showSuggest(which);
+      if (sheet.snap !== 'full') sheet.set('full');
+    });
+  }
+  suggestEl.addEventListener('pointerdown', (e) => {
+    const li = (e.target as HTMLElement).closest<HTMLElement>('[data-station]');
+    if (!li || !suggestFor) return;
+    e.preventDefault();
+    const i = +li.dataset.station!;
+    const input = $<HTMLInputElement>(suggestFor === 'from' ? 'trip-from' : 'trip-to');
+    input.value = state.day.model.stations[i].name;
+    if (suggestFor === 'from') {
+      tripFrom = i;
+      $<HTMLInputElement>('trip-to').focus();
+    } else {
+      tripTo = i;
+      suggestEl.hidden = true;
+      input.blur();
+      runJourney();
+    }
+  });
+  document.addEventListener('pointerdown', (e) => {
+    if (!(e.target as HTMLElement).closest('.trip-form')) suggestEl.hidden = true;
+  });
+  $('trip-swap').addEventListener('click', () => {
+    const a = $<HTMLInputElement>('trip-from'), b = $<HTMLInputElement>('trip-to');
+    [a.value, b.value] = [b.value, a.value];
+    [tripFrom, tripTo] = [tripTo, tripFrom];
+    if (tripFrom !== undefined && tripTo !== undefined) runJourney();
+  });
+  $('trip-form').addEventListener('submit', (e) => {
+    e.preventDefault();
+    suggestEl.hidden = true;
+    runJourney();
+  });
+  const resolveStation = (value: string) => matchStations(state.day.model, value.split(' '), 1)[0];
+  function runJourney() {
+    const m = state.day.model;
+    tripFrom ??= resolveStation($<HTMLInputElement>('trip-from').value);
+    tripTo ??= resolveStation($<HTMLInputElement>('trip-to').value);
+    if (tripFrom === undefined || tripTo === undefined) {
+      $('trip-results').innerHTML = `<p class="fine">Bitte Start und Ziel aus der Liste wählen.</p>`;
+      return;
+    }
+    if (tripFrom === tripTo) {
+      $('trip-results').innerHTML = `<p class="fine">Start und Ziel sind derselbe Bahnhof.</p>`;
+      return;
+    }
+    const tv = $<HTMLInputElement>('trip-time').value;
+    let after = state.time;
+    if (tv) {
+      const [h, mm] = tv.split(':').map(Number);
+      after = h * 60 + mm;
+      if (after < DAY_ROLLOVER && state.time > DAY_ROLLOVER) after += 1440;
+    }
+    lastJourneys = searchJourneys(m, state.day.result, tripFrom, tripTo, after - 5, state.time);
+    renderJourneys();
+  }
+  function renderJourneys() {
+    if (!lastJourneys) return;
+    const m = state.day.model;
+    const res = lastJourneys;
+    $('trip-results').innerHTML = res.journeys.length
+      ? `${journeyVerdict(m, res)}<div class="journeys">${res.journeys.map((j, i) => journeyCard(m, j, i === res.recommended, state.time)).join('')}</div>
+         <p class="fine">Nur Fernverkehr (ICE, IC, EC), bis zu zwei Umstiege. Die Wahrscheinlichkeit berücksichtigt die aktuelle Verspätung, wie lange der Zubringer noch unterwegs ist, und eine Mindestumsteigezeit von 4 bis 6 Minuten. Dass ein Anschlusszug wartet, ist nicht eingerechnet.</p>`
+      : `<p class="fine">Keine Fernverkehrsverbindung in den nächsten vier Stunden gefunden. Für Regionalzüge ist die App noch nicht gebaut.</p>`;
+  }
+  $('trip-results').addEventListener('click', (e) => {
+    const b = (e.target as HTMLElement).closest<HTMLElement>('[data-trip]');
+    if (b) selectTrain(+b.dataset.trip!, true);
+  });
+
+  // --- Lessons learned -------------------------------------------------------------
+  let insights: Insights | null = null;
+  async function loadInsights() {
+    try {
+      const r = await fetch('api/insights', { cache: 'no-cache' });
+      if (r.ok && r.headers.get('content-type')?.includes('json')) {
+        insights = (await r.json()) as Insights;
+        return;
+      }
+    } catch {
+      // lokal berechnen
+    }
+    // Ohne Server (Vorschau, lokal): vorläufig aus dem geladenen Tag
+    const d = state.day;
+    insights = d.mode === 'real' ? findings(mergeDays([aggregateDay(d.model, d.result)])) : null;
+  }
+  void loadInsights().then(() => renderPanels(trainsAt(state.day.model, state.day.result, state.time)));
+  setInterval(() => void loadInsights(), 30 * 60_000);
+  $('open-insights').addEventListener('click', () => {
+    $('report-eyebrow').textContent = 'Lessons learned für die DB';
+    $('report-title').textContent = 'Was die DB lernen kann';
+    overlay.hidden = false;
+    overlay.style.setProperty('--c', 'var(--lamp)');
+    $('report-body').innerHTML = insights ? insightsPage(insights) : '<p class="fine">Noch keine Echtzeitdaten gesammelt.</p>';
+  });
 
   /** Nur neu schreiben, wenn sich etwas geändert hat und gerade niemand tippt – sonst gehen Taps verloren. */
   let touching = false;
@@ -440,26 +656,17 @@ async function main() {
     const top = [...known].sort((a, b) => b.delay - a.delay).slice(0, 6);
     setHtml('worst', top.length ? top.map((t) => trainRow(m, t)).join('') : emptyRow('Gerade kein Zug unterwegs.'));
 
-    // Züge
-    if (!views.trains.hidden) {
-      const q = $<HTMLInputElement>('search').value.trim().toLowerCase();
-      const list = trains
-        .filter((t) => {
-          if (!q) return true;
-          const T = m.trips[t.trip];
-          return T.line.toLowerCase().includes(q) || T.stops.some((s) => m.stations[s].name.toLowerCase().includes(q));
-        })
-        .sort((a, b) => Number(b.known) - Number(a.known) || b.delay - a.delay)
-        .slice(0, 60);
-      setHtml('train-list', list.length ? list.map((t) => trainRow(m, t)).join('') : emptyRow(q ? 'Kein Zug unterwegs, der passt.' : 'Gerade kein Zug unterwegs.'));
-    }
+    if (!views.search.hidden) renderSearch();
+    if (!views.trip.hidden && lastJourneys) renderJourneys();
+    if (state.user) renderNearby();
 
-    // Bericht
-    if (!views.report.hidden) {
+    // Analyse
+    if (!views.analysis.hidden) {
       const g = gradeOf(sofar.punctuality);
       const teaser = $('report-teaser');
       teaser.style.setProperty('--c', g.color);
-      teaser.innerHTML = `<span class="teaser-grade">${sofar.arrivals ? g.grade : '–'}</span><span><span class="eyebrow">Stand ${hhmm(state.time)} · ${fmtDate(d.date)}</span><br>${sofar.arrivals ? esc(g.text) : 'Noch keine Ankünfte.'}</span>`;
+      setHtml('report-teaser', `<span class="teaser-grade">${sofar.arrivals ? g.grade : '–'}</span><span><span class="eyebrow">Stand ${hhmm(state.time)} · ${fmtDate(d.date)}</span><br>${sofar.arrivals ? esc(g.text) : 'Noch keine Ankünfte.'}</span>`);
+      setHtml('insights-teaser', insightsTeaser(insights));
     }
 
     if (!views.detail.hidden) renderDetail();
@@ -478,6 +685,7 @@ async function main() {
   };
   $('open-report').addEventListener('click', () => {
     const day = state.day;
+    $('report-eyebrow').textContent = 'Tagesabschluss';
     $('report-title').textContent = fmtDate(day.date);
     overlay.hidden = false;
     if (day.report) return showReport();
@@ -546,6 +754,7 @@ async function main() {
       selected: { train: state.selectedTrain, station: state.selectedStation },
       minute: state.time,
       now,
+      user: state.user,
     });
     timeline.draw(state.time);
     $('clock').textContent = hhmm(state.time);

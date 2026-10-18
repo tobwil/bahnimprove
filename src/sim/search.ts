@@ -1,0 +1,127 @@
+import type { DayModel } from './model.ts';
+import type { SimResult } from './types.ts';
+
+/** Kleinbuchstaben, Umlaute und Satzzeichen vereinheitlicht ("Köln Hbf" ≈ "koeln hbf" ≈ "koln"). */
+export function fold(s: string): string {
+  return s
+    .toLowerCase()
+    .replace(/ä/g, 'a').replace(/ö/g, 'o').replace(/ü/g, 'u').replace(/ß/g, 'ss')
+    .replace(/ae/g, 'a').replace(/oe/g, 'o').replace(/ue/g, 'u')
+    .normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .replace(/[^a-z0-9 ]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+export type TripStatus = 'running' | 'upcoming' | 'done';
+
+export interface TripHit {
+  trip: number;
+  status: TripStatus;
+  /** Abfahrt am ersten passenden Halt (Soll) */
+  time: number;
+  /** Halt-Index, an dem die Suche passt (für die Anzeige "ab Köln 14:05") */
+  stop: number;
+}
+
+export interface SearchResult {
+  stations: number[];
+  trips: TripHit[];
+}
+
+const LINE = /^(ice|ic|ec|ece|en|nj|rj|rjx|tgv|flx)?\s*(\d{1,5})$/;
+
+/** Bahnhöfe, deren Name alle Suchwörter enthält – wichtigste zuerst, Wortanfänge bevorzugt. */
+export function matchStations(m: DayModel, query: string | string[], limit = 6): number[] {
+  const tokens = (Array.isArray(query) ? query : [query]).map(fold).filter((t) => t.length >= 2);
+  if (!tokens.length) return [];
+  const scored: { i: number; score: number }[] = [];
+  m.stations.forEach((s, i) => {
+    if (s.weight < 1 || /\(Gr\)|Grenze/.test(s.name)) return;
+    const n = fold(s.name);
+    if (!tokens.every((t) => n.includes(t))) return;
+    const pos = n.indexOf(tokens[0]);
+    const wordStart = pos === 0 || n[pos - 1] === ' ';
+    scored.push({ i, score: s.weight * (pos === 0 ? 4 : wordStart ? 2 : 1) * (n.includes('hbf') ? 1.5 : 1) });
+  });
+  return scored.sort((a, b) => b.score - a.score).slice(0, limit).map((x) => x.i);
+}
+
+export function search(m: DayModel, r: SimResult, query: string, now: number): SearchResult {
+  const q = fold(query.replace(/→|->/g, ' '));
+  if (!q) return { stations: [], trips: [] };
+  const words = q.split(' ').filter((w) => w !== 'nach' && w !== 'von' && w !== 'bis');
+
+  // Linie oder Zugnummer ("ICE 28", "28")
+  let lineCat: string | undefined, lineNo: string | undefined;
+  const joined = words.slice(0, 2).join(' ');
+  const lm = LINE.exec(joined) ?? LINE.exec(words[0] ?? '');
+  let rest = words;
+  if (lm) {
+    lineCat = lm[1];
+    lineNo = lm[2];
+    rest = words.slice(LINE.exec(joined) && lm === LINE.exec(joined) && words.length >= 2 && /^\d/.test(words[1]) ? 2 : 1);
+  }
+
+  // Restliche Wörter als Bahnhöfe (mehrteilige Namen werden zusammengefasst)
+  const stationSets: number[][] = [];
+  for (let i = 0; i < rest.length; i++) {
+    const tokens = [rest[i]];
+    let best = matchStations(m, tokens, 40);
+    // "frankfurt flughafen": weiteres Wort verfeinert, statt einen neuen Bahnhof zu beginnen
+    while (i + 1 < rest.length) {
+      const refined = matchStations(m, [...tokens, rest[i + 1]], 40);
+      if (!refined.length) break;
+      tokens.push(rest[++i]);
+      best = refined;
+    }
+    if (best.length) stationSets.push(best);
+  }
+
+  const trips: TripHit[] = [];
+  for (const T of m.trips) {
+    if (lineNo) {
+      const [cat, no] = T.line.toLowerCase().split(' ');
+      if (no !== lineNo || (lineCat && cat !== lineCat)) continue;
+    }
+    // Bahnhöfe in Fahrtrichtung
+    let stop = 0;
+    let ok = true;
+    let first = -1;
+    for (const set of stationSets) {
+      let found = -1;
+      for (let i = stop; i < T.stops.length; i++) {
+        if (set.includes(T.stops[i])) {
+          found = i;
+          break;
+        }
+      }
+      if (found < 0 || (stationSets.length > 1 && found === T.stops.length - 1 && set === stationSets[0])) {
+        ok = false;
+        break;
+      }
+      if (first < 0) first = found;
+      stop = found + 1;
+    }
+    if (!ok || (!lineNo && !stationSets.length)) continue;
+    const R = r.trips[T.id];
+    const status: TripStatus = R.canceled || R.arr[T.stops.length - 1] < now ? 'done' : R.dep[0] > now ? 'upcoming' : 'running';
+    const s = Math.max(0, first);
+    trips.push({ trip: T.id, status, time: s === T.stops.length - 1 ? T.schedArr[s] : T.schedDep[s], stop: s });
+  }
+
+  const order: Record<TripStatus, number> = { running: 0, upcoming: 1, done: 2 };
+  trips.sort((a, b) => {
+    if (a.status !== b.status) return order[a.status] - order[b.status];
+    // Laufende und kommende: nach Zeit; vergangene: neueste zuerst
+    return a.status === 'done' ? b.time - a.time : a.time - b.time;
+  });
+  // Bei einer Bahnhofssuche zuerst die nächsten Abfahrten dort
+  if (stationSets.length === 1 && !lineNo) {
+    trips.sort((a, b) => {
+      const fa = a.time >= now - 2, fb = b.time >= now - 2;
+      return fa !== fb ? (fa ? -1 : 1) : fa ? a.time - b.time : b.time - a.time;
+    });
+  }
+  return { stations: stationSets.length === 1 ? stationSets[0].slice(0, 4) : [], trips: trips.slice(0, 40) };
+}

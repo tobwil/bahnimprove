@@ -32,6 +32,9 @@
         </header>
 
         <div class="map-tools">
+          <button id="locate" class="tool-btn tool-btn--locate" aria-label="Meinen Standort zeigen">
+            <svg viewBox="0 0 16 16" width="18" height="18" aria-hidden="true" shape-rendering="crispEdges"><path fill="currentColor" d="M7 0h2v3H7zM7 13h2v3H7zM0 7h3v2H0zM13 7h3v2h-3zM5 4h6v1H5zM4 5h1v6H4zM11 5h1v6h-1zM5 11h6v1H5zM7 7h2v2H7z"/></svg>
+          </button>
           <button id="zoom-in" class="tool-btn" aria-label="Hineinzoomen">+</button>
           <button id="zoom-out" class="tool-btn" aria-label="Herauszoomen">−</button>
           <button id="zoom-reset" class="tool-btn" aria-label="Ganz Deutschland zeigen">◎</button>
@@ -73,11 +76,16 @@
         <div class="sheet-body" id="sheet-body">
           <nav class="tabs" role="tablist" aria-label="Ansicht">
             <button class="tab is-active" role="tab" data-tab="now" aria-selected="true">Jetzt</button>
-            <button class="tab" role="tab" data-tab="trains" aria-selected="false">Züge</button>
-            <button class="tab" role="tab" data-tab="report" aria-selected="false">Bericht</button>
+            <button class="tab" role="tab" data-tab="search" aria-selected="false">Suche</button>
+            <button class="tab" role="tab" data-tab="trip" aria-selected="false">Reise</button>
+            <button class="tab" role="tab" data-tab="analysis" aria-selected="false">Analyse</button>
           </nav>
 
           <div class="view" id="view-now" role="tabpanel">
+            <section class="block" id="nearby-block" hidden>
+              <h2 class="block-title">In deiner Nähe</h2>
+              <ul id="nearby" class="rows"></ul>
+            </section>
             <section class="block">
               <h2 id="incidents-title" class="block-title">Brennpunkte · letzte 60 Min</h2>
               <ul id="incidents" class="rows"></ul>
@@ -88,18 +96,50 @@
             </section>
           </div>
 
-          <div class="view" id="view-trains" role="tabpanel" hidden>
+          <div class="view" id="view-search" role="tabpanel" hidden>
             <label class="search">
               <span class="visually-hidden">Zug oder Bahnhof suchen</span>
-              <input id="search" type="search" placeholder="ICE 28, Köln, München …" autocomplete="off" />
+              <input id="search" type="search" placeholder="ICE 28, Köln, „Köln München“ …" autocomplete="off" enterkeyhint="search" />
             </label>
-            <ul id="train-list" class="rows"></ul>
+            <ul id="search-results" class="rows"></ul>
           </div>
 
-          <div class="view" id="view-report" role="tabpanel" hidden>
-            <div class="report-teaser" id="report-teaser"></div>
-            <button id="open-report" class="cta">Tagesbericht öffnen</button>
-            <p class="fine">Der Leitstand spielt den Tag mit anderen Entscheidungen nach: Anschlüsse halten, Züge vorlassen, nicht warten.</p>
+          <div class="view" id="view-trip" role="tabpanel" hidden>
+            <form id="trip-form" class="trip-form" autocomplete="off">
+              <div class="trip-fields">
+                <label class="field">
+                  <span class="eyebrow">Von</span>
+                  <input id="trip-from" type="text" placeholder="Startbahnhof" enterkeyhint="next" />
+                </label>
+                <button type="button" id="trip-swap" class="swap-btn" aria-label="Start und Ziel tauschen">⇅</button>
+                <label class="field">
+                  <span class="eyebrow">Nach</span>
+                  <input id="trip-to" type="text" placeholder="Zielbahnhof" enterkeyhint="search" />
+                </label>
+              </div>
+              <ul id="trip-suggest" class="suggest" hidden></ul>
+              <div class="trip-when">
+                <label class="field field--time">
+                  <span class="eyebrow">Ab</span>
+                  <input id="trip-time" type="time" />
+                </label>
+                <button type="submit" class="cta cta--small">Verbindungen prüfen</button>
+              </div>
+            </form>
+            <div id="trip-results"></div>
+          </div>
+
+          <div class="view" id="view-analysis" role="tabpanel" hidden>
+            <section class="block">
+              <h2 class="block-title">Lessons learned für die DB</h2>
+              <div id="insights-teaser"></div>
+              <button id="open-insights" class="cta">Alle Erkenntnisse ansehen</button>
+            </section>
+            <section class="block">
+              <h2 class="block-title">Tagesbericht</h2>
+              <div class="report-teaser" id="report-teaser"></div>
+              <button id="open-report" class="ghost-btn ghost-btn--wide">Tagesbericht öffnen</button>
+            </section>
           </div>
 
           <div class="view" id="view-detail" hidden>
@@ -112,10 +152,12 @@
       </aside>
     </div>
 
+    <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+
     <div id="report" class="report" hidden>
       <div class="report-scroll">
         <header class="report-head">
-          <span class="eyebrow">Tagesabschluss</span>
+          <span class="eyebrow" id="report-eyebrow">Tagesabschluss</span>
           <h2 id="report-title">Tagesbericht</h2>
           <button id="report-close" class="tool-btn" aria-label="Bericht schließen">×</button>
         </header>

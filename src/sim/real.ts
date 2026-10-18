@@ -3,6 +3,16 @@ import { MIN_TRANSFER } from './engine.ts';
 import type { DayModel } from './model.ts';
 import type { SimResult, TripResult } from './types.ts';
 
+export const OBS_ARR = 1;
+export const OBS_DEP = 2;
+
+/** Unix-Sekunden für Mitternacht (Europe/Berlin) des Verkehrstags YYYYMMDD. */
+export function berlinMidnightEpoch(date: string): number {
+  const y = +date.slice(0, 4), mo = +date.slice(4, 6) - 1, d = +date.slice(6, 8);
+  const hour = +new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Berlin', hour: '2-digit', hourCycle: 'h23' }).format(new Date(Date.UTC(y, mo, d, 12)));
+  return (Date.UTC(y, mo, d) - (hour - 12) * 3600000) / 1000;
+}
+
 export interface ObservedStats {
   known: number;
   unknown: number;
@@ -16,6 +26,7 @@ export interface ObservedStats {
  */
 export function observedResult(m: DayModel, rt: RealtimeDay): { result: SimResult; stats: ObservedStats } {
   const stats: ObservedStats = { known: 0, unknown: 0, canceled: 0, feedTime: rt.feedTime };
+  const midnight = berlinMidnightEpoch(rt.date || m.date);
   const trips: TripResult[] = m.trips.map((T) => {
     const n = T.stops.length;
     const data = rt.trips[T.gtfsId];
@@ -31,6 +42,8 @@ export function observedResult(m: DayModel, rt: RealtimeDay): { result: SimResul
     stats.known++;
     const arrD: (number | null)[] = new Array(n).fill(null);
     const depD: (number | null)[] = new Array(n).fill(null);
+    /** Minute im Verkehrstag der letzten Meldung zu dieser Fahrt */
+    const seen = (data.seen - midnight) / 60;
     for (const [seq, a, d] of data.u) {
       // Halt mit der größten stop_sequence ≤ seq (zusammengelegte Doppelhalte)
       let k = -1;
@@ -57,7 +70,13 @@ export function observedResult(m: DayModel, rt: RealtimeDay): { result: SimResul
       dep[i] = Math.max(arr[i], T.schedDep[i] + dd);
       cur = dep[i] - T.schedDep[i];
     }
-    return { arr, dep, causes, known: true };
+    // Beobachtet ist, was gemeldet wurde und bei der letzten Meldung schon vorbei war.
+    const observed = new Uint8Array(n);
+    for (let i = 0; i < n; i++) {
+      if (i > 0 && arrD[i] !== null && arr[i] <= seen + 1) observed[i] |= OBS_ARR;
+      if (i < n - 1 && depD[i] !== null && dep[i] <= seen + 1) observed[i] |= OBS_DEP;
+    }
+    return { arr, dep, causes, known: true, observed };
   });
 
   const connectionOutcome = m.connections.map((c) => {

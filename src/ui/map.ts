@@ -49,6 +49,8 @@ const C = {
   route: px('#ffc56b'),
   routeGlow: px('#ff9e3d'),
   select: px('#ffffff'),
+  user: px('#4aa8ff'),
+  userRing: px('#2f7fd8'),
   hot: [px('#ff4f6e'), px('#c23a55'), px('#7d2538')],
 };
 
@@ -103,6 +105,8 @@ export interface Frame {
   minute: number;
   /** Laufzeit in ms (für Animationen) */
   now: number;
+  /** Eigener Standort */
+  user?: { lon: number; lat: number };
 }
 
 export class PixelMap {
@@ -500,6 +504,15 @@ export class PixelMap {
       const x = xy[f.selected.station * 2], y = xy[f.selected.station * 2 + 1];
       this.ring(buf, x, y, 5, blink ? C.select : C.route);
       this.ring(glow, x, y, 5, C.route);
+    }
+    if (f.user) {
+      const [x, y] = this.project(f.user.lon, f.user.lat);
+      const phase = (f.now / 1600) % 1;
+      this.ring(buf, x, y, 2 + phase * 7, C.userRing);
+      this.ring(glow, x, y, 2 + phase * 7, C.userRing);
+      this.rect(buf, Math.round(x) - 1, Math.round(y) - 1, 3, 3, C.select);
+      this.rect(buf, Math.round(x), Math.round(y), 1, 1, C.user);
+      this.rect(glow, Math.round(x) - 1, Math.round(y) - 1, 3, 3, C.user);
     }
     this.ctx.putImageData(this.image, 0, 0);
     this.glowCtx.putImageData(this.glowImage, 0, 0);
