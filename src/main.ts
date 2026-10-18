@@ -1,25 +1,31 @@
 import './style.css';
 import { dailyReport, type DailyReport, type Objective } from './sim/analysis.ts';
 import { defaultPolicy, simulate } from './sim/engine.ts';
-import { ArrivalIndex, activeIncidents as simIncidents, hotspotsAt, trainAt, trainsAt, type TrainState } from './sim/live.ts';
+import { ArrivalIndex, activeIncidents as simIncidents, hotspotsAt, hourlyPunctuality, trainAt, trainsAt, type LiveHotspot, type TrainState } from './sim/live.ts';
 import { buildDayModel, type DayModel } from './sim/model.ts';
 import { observedResult, type ObservedStats } from './sim/real.ts';
 import type { RealtimeDay } from './realtime/types.ts';
-import { INCIDENT_LABEL, causeText, fmtDelay, hhmm, incidentPlace, shortName, tripLabel } from './sim/text.ts';
+import { causeText, fmtDelay, hhmm, shortName, tripLabel } from './sim/text.ts';
 import type { SimResult, Timetable } from './sim/types.ts';
 import { $, delayColor, esc } from './ui/dom.ts';
 import { PixelMap } from './ui/map.ts';
 import type { MapData } from './ui/mapdata.ts';
-import { renderReport } from './ui/report.ts';
+import { gradeOf, renderReport } from './ui/report.ts';
+import { Sheet } from './ui/sheet.ts';
+import { Timeline } from './ui/timeline.ts';
+import { emptyRow, hotspotRow, incidentRow, stationBoard, trainDetail, trainRow, type Buildup } from './ui/views.ts';
 
 /** Ab dieser Uhrzeit beginnt ein neuer Verkehrstag (Nachtzüge laufen über Mitternacht). */
 const DAY_ROLLOVER = 180;
+const REALTIME_POLL = 60_000;
+const SPEEDS = [1, 60, 300, 1200];
 
 interface Day {
   date: string;
   model: DayModel;
   result: SimResult;
   arrivals: ArrivalIndex;
+  bins: { arrivals: number; punctual: number }[];
   /** Echtzeitdaten oder, wenn keine vorliegen, Simulation */
   mode: 'real' | 'sim';
   stats?: ObservedStats;
@@ -40,8 +46,6 @@ async function fetchRealtime(date: string): Promise<RealtimeDay | null> {
   }
   return null;
 }
-
-const REALTIME_POLL = 60_000;
 
 function berlinNow(): { date: string; minutes: number } {
   const parts = Object.fromEntries(
@@ -66,19 +70,22 @@ function serviceNow() {
 const fmtDate = (d: string) =>
   new Date(Date.UTC(+d.slice(0, 4), +d.slice(4, 6) - 1, +d.slice(6, 8))).toLocaleDateString('de-DE', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' });
 
+const punctColor = (p: number) => delayColor(p > 0.85 ? 0 : p > 0.7 ? 10 : p > 0.55 ? 20 : 40);
+
 async function main() {
   const [tt, mapData] = await Promise.all([
     fetch('data/timetable.json').then((r) => r.json() as Promise<Timetable>),
     fetch('data/map.json').then((r) => r.json() as Promise<MapData>),
   ]);
 
+  // --- Verkehrstage ----------------------------------------------------------
   const days = new Map<string, Day>();
   /** Lädt Echtzeitdaten nach; true, wenn sich etwas geändert hat. */
   const refreshRealtime = async (d: Day): Promise<boolean> => {
     const rt = await fetchRealtime(d.date);
     if (!rt || (d.stats && rt.feedTime <= d.stats.feedTime)) return false;
     const { result, stats } = observedResult(d.model, rt);
-    Object.assign(d, { result, stats, mode: 'real', arrivals: new ArrivalIndex(d.model, result), report: undefined });
+    Object.assign(d, { result, stats, mode: 'real', arrivals: new ArrivalIndex(d.model, result), bins: hourlyPunctuality(d.model, result), report: undefined });
     return true;
   };
   const loadDay = async (date: string): Promise<Day> => {
@@ -86,7 +93,7 @@ async function main() {
     if (!d) {
       const model = buildDayModel(tt, date);
       const result = simulate(model, defaultPolicy());
-      d = { date, model, result, arrivals: new ArrivalIndex(model, result), mode: 'sim' };
+      d = { date, model, result, arrivals: new ArrivalIndex(model, result), bins: hourlyPunctuality(model, result), mode: 'sim' };
       days.set(date, d);
       await refreshRealtime(d);
     }
@@ -101,32 +108,47 @@ async function main() {
     time: serviceNow().minutes,
     selectedTrain: undefined as number | undefined,
     selectedStation: undefined as number | undefined,
+    tab: 'now' as 'now' | 'trains' | 'report',
+    hotspots: [] as LiveHotspot[],
   };
 
   const canvas = $<HTMLCanvasElement>('map');
-  const map = new PixelMap(canvas, mapData, state.day.model);
-  const scrub = $<HTMLInputElement>('scrub');
+  const map = new PixelMap(canvas, $<HTMLCanvasElement>('glow'), mapData, state.day.model);
+  const sheet = new Sheet($('sheet'), [$('sheet-grab'), document.querySelector<HTMLElement>('.status')!]);
+  const timeline = new Timeline($<HTMLCanvasElement>('strip'), (minute) => {
+    state.time = minute;
+    state.live = false;
+    syncControls();
+  });
+
+  /** Simulierte Störungen gibt es nur im Simulationsmodus. */
+  const activeIncidents = (m: DayModel, t: number) => (state.day.mode === 'real' ? [] : simIncidents(m, t));
+
+  const layoutMap = () => {
+    const hud = document.querySelector<HTMLElement>('.hud')!.getBoundingClientRect();
+    const stage = canvas.getBoundingClientRect();
+    const peek = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--sheet-peek')) || 236;
+    map.setInsets(hud.bottom - stage.top + 4, sheet.docked ? 0 : peek);
+  };
+  window.addEventListener('resize', layoutMap);
 
   // --- Zeitsteuerung ---------------------------------------------------------
-  const speedButtons = [...document.querySelectorAll<HTMLButtonElement>('[data-speed]')];
   const syncControls = () => {
     const today = serviceNow().date;
     $('day-today').classList.toggle('is-active', state.day.date === today);
     $('day-yesterday').classList.toggle('is-active', state.day.date === addDays(today, -1));
-    $('go-live').classList.toggle('is-active', state.live);
+    $('go-live').classList.toggle('is-replay', !state.live);
+    $('clock-mode').textContent = state.live ? 'Live' : `${fmtDate(state.day.date)}`;
     $('play').textContent = state.playing ? '❚❚' : '▶';
     $('play').setAttribute('aria-label', state.playing ? 'Pause' : 'Abspielen');
-    speedButtons.forEach((b) => b.classList.toggle('is-active', !state.live && +b.dataset.speed! === state.speed));
-    const mode = $('clock-mode');
-    mode.textContent = state.live ? 'LIVE' : `ZEITRAFFER · ${fmtDate(state.day.date)}`;
-    mode.classList.toggle('is-replay', !state.live);
+    $('speed').textContent = state.live ? 'Live' : `${state.speed}×`;
   };
 
   const switchDay = async (date: string) => {
     state.day = await loadDay(date);
     map.setModel(state.day.model);
-    state.selectedTrain = state.selectedStation = undefined;
-    renderNotice();
+    closeDetail();
+    renderPanels(trainsAt(state.day.model, state.day.result, state.time));
   };
 
   const goLive = async () => {
@@ -138,35 +160,28 @@ async function main() {
     syncControls();
   };
 
-  const toReplay = () => {
-    state.live = false;
-    syncControls();
-  };
-
-  speedButtons.forEach((b) =>
-    b.addEventListener('click', () => {
-      state.speed = +b.dataset.speed!;
-      state.playing = true;
-      toReplay();
-    }),
-  );
-  $('play').addEventListener('click', () => {
-    if (state.live) state.live = false;
-    state.playing = !state.playing;
-    syncControls();
-  });
   $('go-live').addEventListener('click', goLive);
-  scrub.addEventListener('input', () => {
-    state.time = +scrub.value;
-    toReplay();
-  });
   $('day-today').addEventListener('click', goLive);
   $('day-yesterday').addEventListener('click', async () => {
     await switchDay(addDays(serviceNow().date, -1));
     state.time = 6 * 60;
     state.speed = 300;
     state.playing = true;
-    toReplay();
+    state.live = false;
+    syncControls();
+  });
+  $('play').addEventListener('click', () => {
+    if (state.live) state.live = false;
+    state.playing = !state.playing;
+    syncControls();
+  });
+  $('speed').addEventListener('click', () => {
+    if (state.live) {
+      state.live = false;
+      state.speed = 60;
+    } else state.speed = SPEEDS[(SPEEDS.indexOf(state.speed) + 1) % SPEEDS.length];
+    state.playing = true;
+    syncControls();
   });
 
   // --- Karte: Zoom, Pan, Auswahl ---------------------------------------------
@@ -197,7 +212,7 @@ async function main() {
     }
     if (drag) {
       const dx = e.offsetX - drag.x, dy = e.offsetY - drag.y;
-      if (drag.moved || Math.hypot(dx, dy) > 4) {
+      if (drag.moved || Math.hypot(dx, dy) > 5) {
         drag.moved = true;
         canvas.classList.add('is-dragging');
         const [mx0, my0] = map.toMapPixel(drag.x, drag.y);
@@ -208,7 +223,7 @@ async function main() {
       }
       return;
     }
-    hover(e.offsetX, e.offsetY);
+    if (e.pointerType === 'mouse') hover(e.offsetX, e.offsetY);
   });
   const endPointer = (e: PointerEvent) => {
     pointers.delete(e.pointerId);
@@ -216,9 +231,9 @@ async function main() {
     if (drag && !drag.moved && pointers.size === 0) {
       const [mx, my] = map.toMapPixel(e.offsetX, e.offsetY);
       const hit = map.hitTest(mx, my);
-      state.selectedTrain = hit?.type === 'train' ? hit.id : undefined;
-      state.selectedStation = hit?.type === 'station' ? hit.id : undefined;
-      renderSelection();
+      if (hit?.type === 'train') selectTrain(hit.id, false);
+      else if (hit?.type === 'station') selectStation(hit.id);
+      else closeDetail();
     }
     if (pointers.size === 0) drag = null;
     canvas.classList.remove('is-dragging');
@@ -231,16 +246,13 @@ async function main() {
     (e) => {
       e.preventDefault();
       const [mx, my] = map.toMapPixel(e.offsetX, e.offsetY);
-      map.zoomAt(e.deltaY < 0 ? 1.25 : 0.8, mx, my);
+      map.zoomAt(e.deltaY < 0 ? 1.2 : 1 / 1.2, mx, my);
     },
     { passive: false },
   );
-  $('zoom-in').addEventListener('click', () => map.zoomAt(1.4, map.w / 2, map.h / 2));
-  $('zoom-out').addEventListener('click', () => map.zoomAt(1 / 1.4, map.w / 2, map.h / 2));
-  $('zoom-reset').addEventListener('click', () => {
-    map.zoom = 1;
-    map.focus(10.45, 51.15);
-  });
+  $('zoom-in').addEventListener('click', () => map.zoomAt(1.5, map.w / 2, map.h / 2));
+  $('zoom-out').addEventListener('click', () => map.zoomAt(1 / 1.5, map.w / 2, map.h / 2));
+  $('zoom-reset').addEventListener('click', () => map.reset());
 
   const tooltip = $('tooltip');
   function hover(cssX: number, cssY: number) {
@@ -248,236 +260,259 @@ async function main() {
     const hit = map.hitTest(mx, my);
     if (!hit) {
       tooltip.hidden = true;
+      canvas.style.cursor = '';
       return;
     }
+    canvas.style.cursor = 'pointer';
     const m = state.day.model;
     if (hit.type === 'train') {
       const s = trainAt(m, state.day.result, hit.id, state.time);
-      tooltip.innerHTML = `${esc(tripLabel(m, hit.id))} <b style="color:${delayColor(s?.delay ?? 0)}">${fmtDelay(s?.delay ?? 0)}</b>`;
-    } else tooltip.textContent = m.stations[hit.id].name;
+      tooltip.innerHTML = `${esc(tripLabel(m, hit.id))} <b style="color:${s?.known ? delayColor(s.delay) : 'var(--nodata)'}">${s?.known ? fmtDelay(s.delay) : '–'}</b>`;
+    } else tooltip.textContent = shortName(m.stations[hit.id].name);
     tooltip.style.left = `${cssX}px`;
     tooltip.style.top = `${cssY}px`;
     tooltip.hidden = false;
   }
 
-  // --- Seitenleiste ----------------------------------------------------------
-  const selectTrain = (trip: number) => {
+  // --- Ansichten im Sheet ----------------------------------------------------
+  const views = { now: $('view-now'), trains: $('view-trains'), report: $('view-report'), detail: $('view-detail') };
+  const showView = (v: keyof typeof views) => {
+    for (const [k, el] of Object.entries(views)) el.hidden = k !== v;
+    $('sheet').classList.toggle('is-detail', v === 'detail');
+    document.querySelector<HTMLElement>('.tabs')!.hidden = v === 'detail';
+  };
+  document.querySelectorAll<HTMLButtonElement>('.tab').forEach((b) =>
+    b.addEventListener('click', () => {
+      state.tab = b.dataset.tab as typeof state.tab;
+      document.querySelectorAll('.tab').forEach((t) => {
+        t.classList.toggle('is-active', t === b);
+        t.setAttribute('aria-selected', String(t === b));
+      });
+      closeDetail();
+      if (sheet.snap === 'peek') sheet.set('half');
+    }),
+  );
+
+  function selectTrain(trip: number, fromList: boolean) {
     state.selectedTrain = trip;
     state.selectedStation = undefined;
-    renderSelection();
-    $('selection-panel').scrollIntoView({ block: 'nearest' });
-  };
-
-  function renderSelection() {
-    const panel = $('selection-panel');
-    const box = $('selection');
+    showView('detail');
+    renderDetail(true);
+    $('sheet-body').scrollTop = 0;
+    if (sheet.snap === 'peek') sheet.set('half');
     const m = state.day.model;
-    const r = state.day.result;
-    if (state.selectedTrain !== undefined) {
-      const id = state.selectedTrain;
-      const T = m.trips[id];
-      const R = r.trips[id];
-      const s = trainAt(m, r, id, state.time);
-      const now = state.time;
-      $('sel-title').textContent = T.line;
-      const causes =
-        state.day.mode === 'real'
-          ? delayBuildup(id).filter((b) => b.at <= now + 0.01).map((b) => b.text)
-          : R.causes
-              .flatMap((cs, i) => cs.map((c) => ({ c, i })))
-              .filter(({ c, i }) => c.minutes >= 1 && (i === 0 ? R.dep[0] : R.arr[i]) <= now + 0.01)
-              .map(({ c }) => causeText(m, c));
-      box.innerHTML = `
-        <div class="sel-meta">${esc(shortName(m.stations[T.stops[0]].name))} → ${esc(shortName(m.stations[T.stops[T.stops.length - 1]].name))} · ${esc(T.operator)}</div>
-        <div class="sel-delay" style="color:${R.known === false ? 'var(--muted)' : delayColor(s?.delay ?? 0)}">${R.canceled ? 'fällt aus' : R.known === false ? 'keine Echtzeitdaten' : s ? `${fmtDelay(s.delay)} Min` : now < R.dep[0] ? 'noch nicht abgefahren' : 'angekommen'}</div>
-        ${causes.length ? `<ul class="causes">${causes.map((c) => `<li>${esc(c)}</li>`).join('')}</ul>` : ''}
-        <ol class="stops">
-          ${T.stops
-            .map((st, i) => {
-              const sched = i === 0 ? T.schedDep[i] : T.schedArr[i];
-              const act = i === 0 ? R.dep[i] : R.arr[i];
-              const d = act - sched;
-              const past = act <= now;
-              const isNow = s && s.stop === i;
-              if (R.known === false) return `<li class="${act <= now ? 'is-past' : ''} ${isNow ? 'is-now' : ''}"><span class="dot"></span><span>${esc(shortName(m.stations[st].name))}</span><span class="t">${hhmm(sched)}</span><span class="t"></span></li>`;
-              return `<li class="${past ? 'is-past' : ''} ${isNow ? 'is-now' : ''}"><span class="dot"></span><span>${esc(shortName(m.stations[st].name))}</span><span class="t">${hhmm(sched)}</span><span class="t" style="color:${delayColor(d)}">${past || isNow ? fmtDelay(d) : ''}</span></li>`;
-            })
-            .join('')}
-        </ol>`;
-      panel.hidden = false;
-    } else if (state.selectedStation !== undefined) {
-      const st = state.selectedStation;
-      $('sel-title').textContent = shortName(m.stations[st].name);
-      const deps: { trip: number; sched: number; act: number; to: string }[] = [];
-      for (const T of m.trips) {
-        const i = T.stops.indexOf(st);
-        if (i < 0 || i === T.stops.length - 1) continue;
-        const act = r.trips[T.id].dep[i];
-        if (act < state.time - 1 || T.schedDep[i] > state.time + 90) continue;
-        deps.push({ trip: T.id, sched: T.schedDep[i], act, to: shortName(m.stations[T.stops[T.stops.length - 1]].name) });
-      }
-      deps.sort((a, b) => a.sched - b.sched);
-      box.innerHTML = `<div class="sel-meta">Abfahrten der nächsten 90 Minuten</div>
-        <ul class="list">${
-          deps.length
-            ? deps
-                .slice(0, 14)
-                .map(
-                  (d) => `<li data-trip="${d.trip}"><span class="t">${hhmm(d.sched)}</span><span class="badge" style="background:${delayColor(d.act - d.sched)}">${fmtDelay(d.act - d.sched)}</span><span>${esc(m.trips[d.trip].line)} <span class="meta">nach ${esc(d.to)}</span></span></li>`,
-                )
-                .join('')
-            : '<li class="empty">Keine Abfahrten</li>'
-        }</ul>`;
-      panel.hidden = false;
-    } else panel.hidden = true;
+    const s = trainAt(m, state.day.result, trip, state.time);
+    if (fromList || s) {
+      const T = m.trips[trip];
+      const a = m.stations[T.stops[s?.stop ?? 0]], b = m.stations[T.stops[Math.min((s?.stop ?? 0) + 1, T.stops.length - 1)]];
+      const p = s?.progress ?? 0;
+      requestAnimationFrame(() => map.ensureVisible(a.lon + (b.lon - a.lon) * p, a.lat + (b.lat - a.lat) * p, sheet.visibleHeight(), fromList ? 2 : 1));
+    }
   }
-  /** Echte Daten: wo ist die Verspätung entstanden? (Zuwachs je Abschnitt und Halt) */
-  function delayBuildup(id: number): { at: number; text: string }[] {
+
+  function selectStation(station: number) {
+    state.selectedStation = station;
+    state.selectedTrain = undefined;
+    showView('detail');
+    renderDetail(true);
+    $('sheet-body').scrollTop = 0;
+    if (sheet.snap === 'peek') sheet.set('half');
+    const st = state.day.model.stations[station];
+    requestAnimationFrame(() => map.ensureVisible(st.lon, st.lat, sheet.visibleHeight()));
+  }
+
+  function closeDetail() {
+    state.selectedTrain = state.selectedStation = undefined;
+    showView(state.tab);
+  }
+  $('detail-back').addEventListener('click', closeDetail);
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    if (!$('report').hidden) $('report').hidden = true;
+    else closeDetail();
+  });
+
+  /** Echte Daten: wo ist die Verspätung entstanden? Simulation: Ursachen aus dem Modell. */
+  function buildup(id: number): Buildup[] {
     const m = state.day.model;
     const T = m.trips[id];
     const R = state.day.result.trips[id];
+    if (R.known === false || R.canceled) return [];
+    if (state.day.mode === 'sim') {
+      return R.causes.flatMap((cs, i) =>
+        cs.filter((c) => c.minutes >= 1).map((c) => ({ at: i === 0 ? R.dep[0] : R.arr[i], minutes: c.minutes, text: causeText(m, c).replace(/^\+\d+ Min /, '') })),
+      );
+    }
     const name = (i: number) => shortName(m.stations[T.stops[i]].name);
-    const out: { at: number; text: string }[] = [];
+    const out: Buildup[] = [];
     const d0 = R.dep[0] - T.schedDep[0];
-    if (d0 >= 2) out.push({ at: R.dep[0], text: `+${Math.round(d0)} Min schon bei Abfahrt in ${name(0)}` });
+    if (d0 >= 2) out.push({ at: R.dep[0], minutes: d0, text: `schon bei Abfahrt in ${name(0)}` });
     for (let i = 0; i + 1 < T.stops.length; i++) {
       const run = R.arr[i + 1] - T.schedArr[i + 1] - (R.dep[i] - T.schedDep[i]);
-      if (run >= 2) out.push({ at: R.arr[i + 1], text: `+${Math.round(run)} Min zwischen ${name(i)} und ${name(i + 1)}` });
-      else if (run <= -2) out.push({ at: R.arr[i + 1], text: `${Math.round(run)} Min aufgeholt bis ${name(i + 1)}` });
+      if (run >= 2) out.push({ at: R.arr[i + 1], minutes: run, text: `zwischen ${name(i)} und ${name(i + 1)}` });
+      else if (run <= -2) out.push({ at: R.arr[i + 1], minutes: run, text: `aufgeholt bis ${name(i + 1)}` });
       if (i + 1 < T.stops.length - 1) {
         const dwell = R.dep[i + 1] - T.schedDep[i + 1] - (R.arr[i + 1] - T.schedArr[i + 1]);
-        if (dwell >= 2) out.push({ at: R.dep[i + 1], text: `+${Math.round(dwell)} Min beim Halt in ${name(i + 1)}` });
+        if (dwell >= 2) out.push({ at: R.dep[i + 1], minutes: dwell, text: `beim Halt in ${name(i + 1)}` });
       }
     }
     return out;
   }
 
-  $('selection').addEventListener('click', (e) => {
-    const li = (e.target as HTMLElement).closest<HTMLElement>('[data-trip]');
-    if (li) selectTrain(+li.dataset.trip!);
-  });
-  $('sel-close').addEventListener('click', () => {
-    state.selectedTrain = state.selectedStation = undefined;
-    renderSelection();
+  function renderDetail(force = false) {
+    const m = state.day.model, r = state.day.result;
+    if (state.selectedTrain !== undefined) {
+      const id = state.selectedTrain;
+      setHtml('detail', trainDetail(m, r, id, trainAt(m, r, id, state.time), state.time, buildup(id)), force);
+    } else if (state.selectedStation !== undefined) {
+      setHtml('detail', stationBoard(m, r, state.selectedStation, state.time), force);
+    }
+  }
+  $('detail').addEventListener('click', (e) => {
+    const row = (e.target as HTMLElement).closest<HTMLElement>('[data-trip]');
+    if (row) selectTrain(+row.dataset.trip!, true);
   });
 
-  /** Simulierte Störungen gibt es nur im Simulationsmodus. */
-  const activeIncidents = (m: DayModel, t: number) => (state.day.mode === 'real' ? [] : simIncidents(m, t));
-  const severity = (k: string) => ['oberleitung', 'personen', 'notarzt', 'signal', 'weiche', 'fahrzeug', 'bau'].indexOf(k);
+  const onRowClick = (e: Event) => {
+    const row = (e.target as HTMLElement).closest<HTMLElement>('[data-trip], [data-station], [data-lon]');
+    if (!row) return;
+    if (row.dataset.trip) selectTrain(+row.dataset.trip, true);
+    else if (row.dataset.station) selectStation(+row.dataset.station);
+    else requestAnimationFrame(() => map.ensureVisible(+row.dataset.lon!, +row.dataset.lat!, sheet.visibleHeight(), 3));
+  };
+  $('incidents').addEventListener('click', onRowClick);
+  $('worst').addEventListener('click', onRowClick);
+  $('train-list').addEventListener('click', onRowClick);
+  $<HTMLInputElement>('search').addEventListener('input', () => renderPanels(trainsAt(state.day.model, state.day.result, state.time)));
+
+  /** Nur neu schreiben, wenn sich etwas geändert hat und gerade niemand tippt – sonst gehen Taps verloren. */
+  let touching = false;
+  $('sheet').addEventListener('pointerdown', () => (touching = true));
+  window.addEventListener('pointerup', () => setTimeout(() => (touching = false), 50));
+  window.addEventListener('pointercancel', () => (touching = false));
+  const setHtml = (id: string, html: string, force = false) => {
+    const el = $(id);
+    if ((touching && !force) || el.dataset.html === html) return;
+    el.dataset.html = html;
+    el.innerHTML = html;
+  };
+
   function renderPanels(trains: TrainState[]) {
-    const m = state.day.model;
-    const sofar = state.day.arrivals.until(state.time);
-    $('kpi-punct').textContent = sofar.arrivals ? `${(sofar.punctuality * 100).toFixed(1).replace('.', ',')}%` : '–';
-    $('kpi-punct').style.color = sofar.arrivals ? delayColor(sofar.punctuality > 0.8 ? 0 : sofar.punctuality > 0.7 ? 10 : sofar.punctuality > 0.6 ? 20 : 40) : '';
+    const d = state.day;
+    const m = d.model;
+    const real = d.mode === 'real';
+    const sofar = d.arrivals.until(state.time);
+    const known = trains.filter((t) => t.known);
+
+    // Status
+    const gauge = $('gauge');
+    gauge.style.setProperty('--p', String(sofar.arrivals ? sofar.punctuality * 100 : 0));
+    gauge.style.setProperty('--c', sofar.arrivals ? punctColor(sofar.punctuality) : 'var(--dim)');
+    $('kpi-punct').innerHTML = sofar.arrivals ? `${Math.floor(sofar.punctuality * 100)}<small>,${Math.floor((sofar.punctuality * 1000) % 10)}%</small>` : '–';
+    const late = known.filter((t) => t.delay >= 15).length;
+    const worst = [...known].sort((a, b) => b.delay - a.delay)[0];
+    $('status-line').textContent = !trains.length
+      ? 'Gerade ist kein Fernverkehrszug unterwegs.'
+      : late
+        ? `${late} ${late === 1 ? 'Zug' : 'Züge'} mit über 15 Min Verspätung, am stärksten ${m.trips[worst.trip].line} mit ${fmtDelay(worst.delay)}`
+        : 'Das Netz läuft gerade stabil.';
+    const chip = $('source-chip');
+    chip.classList.toggle('is-sim', !real);
+    if (real && d.stats) {
+      const t = new Date(d.stats.feedTime * 1000).toLocaleTimeString('de-DE', { timeZone: 'Europe/Berlin', hour: '2-digit', minute: '2-digit' });
+      chip.innerHTML = `<b>● Echtzeit</b> Stand ${t} · ${d.stats.known} Züge mit Ist-Daten${d.stats.canceled ? ` · ${d.stats.canceled} Ausfälle` : ''}`;
+    } else chip.innerHTML = `<b>● Simulation</b> Für ${fmtDate(d.date)} liegen keine Echtzeitdaten vor`;
     $('kpi-active').textContent = String(trains.length);
-    const knownTrains = trains.filter((t) => t.known);
-    const avg = knownTrains.length ? knownTrains.reduce((s, t) => s + t.delay, 0) / knownTrains.length : 0;
-    $('kpi-delay').textContent = knownTrains.length ? `${avg.toFixed(1).replace('.', ',')}′` : '–';
-    const real = state.day.mode === 'real';
+    $('kpi-delay').textContent = known.length ? `${(known.reduce((s, t) => s + t.delay, 0) / known.length).toFixed(1).replace('.', ',')}′` : '–';
+
+    // Jetzt
+    state.hotspots = hotspotsAt(m, d.result, state.time);
+    const incs = activeIncidents(m, state.time);
     $('kpi-incidents-label').textContent = real ? 'Brennpunkte' : 'Störungen';
-    $('kpi-incidents-hint').textContent = real ? 'letzte 60 Min' : 'aktiv';
+    $('kpi-incidents').textContent = String(real ? state.hotspots.length : incs.length);
     $('incidents-title').textContent = real ? 'Brennpunkte · letzte 60 Min' : 'Störungen jetzt';
-    if (real) {
-      // Echte Daten enthalten keine Störungsmeldungen – stattdessen: wo wächst die Verspätung gerade?
-      const hs = hotspotsAt(m, state.day.result, state.time);
-      $('kpi-incidents').textContent = String(hs.length);
-      $('incidents').innerHTML = hs.length
-        ? hs
-            .slice(0, 7)
-            .map((h) => {
-              const st = m.stations[h.station];
-              return `<li data-lon="${st.lon}" data-lat="${st.lat}"><span class="badge" style="background:${delayColor(h.minutes / Math.max(1, h.trains) * 3)}">+${Math.round(h.minutes)}</span><span>${esc(shortName(st.name))} <span class="meta">${h.trains} ${h.trains === 1 ? 'Zug' : 'Züge'} haben hier Zeit verloren</span></span></li>`;
-            })
-            .join('')
-        : '<li class="empty">Gerade baut sich nirgends Verspätung auf</li>';
+    if (real) setHtml('incidents', state.hotspots.length ? state.hotspots.slice(0, 6).map((h) => hotspotRow(m, h)).join('') : emptyRow('Gerade baut sich nirgends Verspätung auf.'));
+    else {
+      const acute = incs.filter((i) => i.kind !== 'bau');
+      const works = incs.filter((i) => i.kind === 'bau');
+      setHtml('incidents', [...acute, ...works.slice(0, 3)].map((i) => incidentRow(m, i)).join('') || emptyRow('Keine Störungen.'));
     }
-    const incs = real ? [] : activeIncidents(m, state.time).sort((a, b) => severity(a.kind) - severity(b.kind));
-    if (!real) $('kpi-incidents').textContent = String(incs.length);
-    const acute = incs.filter((i) => i.kind !== 'bau');
-    const works = incs.filter((i) => i.kind === 'bau');
-    if (!real) $('incidents').innerHTML =
-      acute
-        .map(
-          (i) => `<li data-lon="${i.lon}" data-lat="${i.lat}"><span class="badge" style="background:${i.blocking ? '#f43f5e' : '#facc15'}">${i.blocking ? 'STOP' : '!'}</span><span>${INCIDENT_LABEL[i.kind]} <span class="meta">${esc(incidentPlace(m, i))} · bis ${hhmm(i.end)}</span></span></li>`,
-        )
-        .join('') +
-        (works.length
-          ? `<li data-works="1"><span class="badge" style="background:#fb923c">BAU</span><span>${works.length} Langsamfahrstellen <span class="meta">${works
-              .slice(0, 4)
-              .map((i) => esc(incidentPlace(m, i)))
-              .join(' · ')}${works.length > 4 ? ' …' : ''}</span></span></li>`
-          : '') || '<li class="empty">Keine Störungen</li>';
-    const worst = knownTrains.sort((a, b) => b.delay - a.delay).slice(0, 7);
-    $('worst').innerHTML = worst.length
-      ? worst
-          .map(
-            (t) => `<li data-trip="${t.trip}"><span class="badge" style="background:${delayColor(t.delay)}">${fmtDelay(t.delay)}</span><span>${esc(tripLabel(m, t.trip))}</span></li>`,
-          )
-          .join('')
-      : '<li class="empty">Gerade kein Zug unterwegs</li>';
-    if (state.selectedTrain !== undefined || state.selectedStation !== undefined) renderSelection();
+    const top = [...known].sort((a, b) => b.delay - a.delay).slice(0, 6);
+    setHtml('worst', top.length ? top.map((t) => trainRow(m, t)).join('') : emptyRow('Gerade kein Zug unterwegs.'));
+
+    // Züge
+    if (!views.trains.hidden) {
+      const q = $<HTMLInputElement>('search').value.trim().toLowerCase();
+      const list = trains
+        .filter((t) => {
+          if (!q) return true;
+          const T = m.trips[t.trip];
+          return T.line.toLowerCase().includes(q) || T.stops.some((s) => m.stations[s].name.toLowerCase().includes(q));
+        })
+        .sort((a, b) => Number(b.known) - Number(a.known) || b.delay - a.delay)
+        .slice(0, 60);
+      setHtml('train-list', list.length ? list.map((t) => trainRow(m, t)).join('') : emptyRow(q ? 'Kein Zug unterwegs, der passt.' : 'Gerade kein Zug unterwegs.'));
+    }
+
+    // Bericht
+    if (!views.report.hidden) {
+      const g = gradeOf(sofar.punctuality);
+      const teaser = $('report-teaser');
+      teaser.style.setProperty('--c', g.color);
+      teaser.innerHTML = `<span class="teaser-grade">${sofar.arrivals ? g.grade : '–'}</span><span><span class="eyebrow">Stand ${hhmm(state.time)} · ${fmtDate(d.date)}</span><br>${sofar.arrivals ? esc(g.text) : 'Noch keine Ankünfte.'}</span>`;
+    }
+
+    if (!views.detail.hidden) renderDetail();
+    timeline.setData(d.bins, d.date === serviceNow().date ? serviceNow().minutes : Infinity);
   }
-  $('worst').addEventListener('click', (e) => {
-    const li = (e.target as HTMLElement).closest<HTMLElement>('[data-trip]');
-    if (li) selectTrain(+li.dataset.trip!);
-  });
-  let worksCursor = 0;
-  $('incidents').addEventListener('click', (e) => {
-    const li = (e.target as HTMLElement).closest<HTMLElement>('[data-lon], [data-works]');
-    if (!li) return;
-    if (li.dataset.works) {
-      // Klick springt reihum von Baustelle zu Baustelle
-      const works = activeIncidents(state.day.model, state.time).filter((i) => i.kind === 'bau');
-      if (!works.length) return;
-      const w = works[worksCursor++ % works.length];
-      map.focus(w.lon, w.lat, Math.max(map.zoom, 3));
-    } else map.focus(+li.dataset.lon!, +li.dataset.lat!, Math.max(map.zoom, 3));
-  });
 
   // --- Tagesbericht ----------------------------------------------------------
-  const dialog = $<HTMLDialogElement>('report');
+  const overlay = $('report');
   let objective: Objective = 'punctuality';
+  let objectiveChosen = false;
   const showReport = () => {
     const day = state.day;
-    const partial = day.date === serviceNow().date;
-    $('report-body').innerHTML = renderReport(day.model, day.report!, { partial, objective, observed: day.mode === 'real' ? day.result : undefined });
+    const out = renderReport(day.model, day.report!, { partial: day.date === serviceNow().date, objective, observed: day.mode === 'real' ? day.result : undefined });
+    $('report-body').innerHTML = out.html;
+    overlay.style.setProperty('--c', out.color);
   };
   $('open-report').addEventListener('click', () => {
     const day = state.day;
-    $('report-title').textContent = `Tagesbericht · ${fmtDate(day.date)}`;
-    dialog.showModal();
+    $('report-title').textContent = fmtDate(day.date);
+    overlay.hidden = false;
     if (day.report) return showReport();
-    $('report-body').innerHTML = `<div class="loading">Der Leitstand spielt alternative Entscheidungen durch …<div class="loading-bar"></div></div>`;
-    // Erst rendern lassen, dann rechnen
+    $('report-body').innerHTML = `<div class="loading">Der Leitstand spielt den Tag mit anderen Entscheidungen nach …<div class="loading-bar"></div></div>`;
     setTimeout(() => {
       day.report = dailyReport(day.model, day.mode === 'real' ? { observed: day.result } : {});
-      showReport();
-    }, 60);
+      // Ohne Pünktlichkeits-Hebel mit dem Fahrgast-Ziel öffnen, damit der Bericht nicht leer startet
+      if (!objectiveChosen) objective = day.report.suggestions.some((s) => s.punctualityDelta > 0) ? 'punctuality' : 'passengers';
+      if (!overlay.hidden) showReport();
+    }, 80);
   });
-  $('report-close').addEventListener('click', () => dialog.close());
-  dialog.addEventListener('click', (e) => {
-    if (e.target === dialog) dialog.close();
-  });
+  $('report-close').addEventListener('click', () => (overlay.hidden = true));
   $('report-body').addEventListener('click', (e) => {
     const o = (e.target as HTMLElement).closest<HTMLElement>('[data-objective]');
     if (o) {
       objective = o.dataset.objective as Objective;
+      objectiveChosen = true;
       return showReport();
     }
     const b = (e.target as HTMLElement).closest<HTMLElement>('[data-show-trip]');
     if (!b) return;
-    dialog.close();
+    overlay.hidden = true;
     state.time = +b.dataset.showTime!;
     state.speed = 60;
     state.playing = true;
-    toReplay();
-    selectTrain(+b.dataset.showTrip!);
-    // Zug ins Bild holen
-    const T = state.day.model.trips[+b.dataset.showTrip!];
-    const s = trainAt(state.day.model, state.day.result, T.id, state.time);
-    const st = state.day.model.stations[T.stops[s?.stop ?? 0]];
-    map.focus(st.lon, st.lat, Math.max(map.zoom, 3));
+    state.live = false;
+    syncControls();
+    selectTrain(+b.dataset.showTrip!, true);
   });
+
+  // --- Echtzeit nachladen ----------------------------------------------------
+  setInterval(async () => {
+    const d = state.day;
+    if (d.date === serviceNow().date && (await refreshRealtime(d))) renderPanels(trainsAt(d.model, d.result, state.time));
+  }, REALTIME_POLL);
 
   // --- Hauptschleife ---------------------------------------------------------
   let last = performance.now();
@@ -487,7 +522,7 @@ async function main() {
     last = now;
     if (state.live) {
       const sn = serviceNow();
-      if (sn.date !== state.day.date) switchDay(sn.date);
+      if (sn.date !== state.day.date) void switchDay(sn.date);
       state.time = sn.minutes;
     } else if (state.playing) {
       state.time += (dt / 60000) * state.speed;
@@ -497,43 +532,33 @@ async function main() {
         syncControls();
       }
     }
-    const trains = trainsAt(state.day.model, state.day.result, state.time);
-    map.draw(trains, activeIncidents(state.day.model, state.time), { train: state.selectedTrain, station: state.selectedStation }, Math.floor(now / 400) % 2 === 0);
-    $('clock').textContent = hhmm(state.time);
-    if (document.activeElement !== scrub) scrub.value = String(Math.round(state.time));
-    if (now - lastPanel > 400) {
+    const d = state.day;
+    const trains = trainsAt(d.model, d.result, state.time);
+    if (now - lastPanel > 500) {
       lastPanel = now;
       renderPanels(trains);
     }
+    const maxHot = Math.max(30, ...state.hotspots.map((h) => h.minutes));
+    map.draw({
+      trains,
+      incidents: activeIncidents(d.model, state.time),
+      hotspots: state.hotspots.slice(0, 8).map((h) => ({ station: h.station, intensity: h.minutes / maxHot })),
+      selected: { train: state.selectedTrain, station: state.selectedStation },
+      minute: state.time,
+      now,
+    });
+    timeline.draw(state.time);
+    $('clock').textContent = hhmm(state.time);
     requestAnimationFrame(loop);
   };
 
-  function renderNotice() {
-    const d = state.day;
-    const stale = d.model.timetableDate !== d.date ? ` Fahrplan-Stand ${fmtDate(d.model.timetableDate)} (gleicher Wochentag), bitte Daten aktualisieren.` : '';
-    if (d.mode === 'real' && d.stats) {
-      const st = d.stats;
-      const time = new Date(st.feedTime * 1000).toLocaleTimeString('de-DE', { timeZone: 'Europe/Berlin', hour: '2-digit', minute: '2-digit' });
-      $('notice').innerHTML = `<strong class="is-real">Echtzeitdaten</strong> Stand ${time} · ${st.known} Fahrten mit Ist-Daten${st.canceled ? ` · ${st.canceled} Ausfälle` : ''} · ${st.unknown} Fahrten ohne Meldung (grau, nach Fahrplan).${stale}`;
-    } else {
-      $('notice').innerHTML = `<strong>Simulation</strong> Für diesen Tag liegen keine Echtzeitdaten vor. Der Fahrplan ist echt, Störungen und Verspätungen sind simuliert.${stale}`;
-    }
-    $('clock-mode').dataset.source = d.mode;
-  }
-  setInterval(async () => {
-    const d = state.day;
-    if (d.date !== serviceNow().date) return;
-    if (await refreshRealtime(d)) {
-      if (state.day === d) renderNotice();
-    }
-  }, REALTIME_POLL);
-
-  renderNotice();
+  layoutMap();
   syncControls();
+  renderPanels(trainsAt(state.day.model, state.day.result, state.time));
   requestAnimationFrame(loop);
 }
 
 main().catch((err) => {
   console.error(err);
-  document.body.insertAdjacentHTML('afterbegin', `<p style="padding:16px;color:#f43f5e">Fehler beim Laden: ${esc(String(err))}</p>`);
+  document.body.insertAdjacentHTML('afterbegin', `<p style="position:fixed;z-index:99;padding:16px;color:#ff4f6e">Fehler beim Laden: ${esc(String(err))}</p>`);
 });

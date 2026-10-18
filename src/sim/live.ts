@@ -127,3 +127,20 @@ export class ArrivalIndex {
     };
   }
 }
+
+/** Ankünfte und pünktliche Ankünfte je Stunde des Verkehrstags (03:00 bis 03:00). */
+export function hourlyPunctuality(m: DayModel, r: SimResult): { arrivals: number; punctual: number }[] {
+  const bins = Array.from({ length: 24 }, () => ({ arrivals: 0, punctual: 0 }));
+  for (const T of m.trips) {
+    const R = r.trips[T.id];
+    if (!counts(R)) continue;
+    for (let i = 1; i < T.stops.length; i++) {
+      if (!inGermany(m.stations[T.stops[i]])) continue;
+      const h = Math.floor(R.arr[i] / 60) - 3;
+      if (h < 0 || h > 23) continue;
+      bins[h].arrivals++;
+      if (R.arr[i] - T.schedArr[i] < PUNCTUAL_LIMIT) bins[h].punctual++;
+    }
+  }
+  return bins;
+}
