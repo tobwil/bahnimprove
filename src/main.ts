@@ -1,4 +1,5 @@
 // Schriften lokal ausliefern – keine Anfragen an Google (Datenschutz)
+import { setTrackingDisabled, track, trackingDisabled } from './analytics.ts';
 import '@fontsource/geist-sans/latin-400.css';
 import '@fontsource/geist-sans/latin-500.css';
 import '@fontsource/geist-sans/latin-600.css';
@@ -167,6 +168,7 @@ async function main() {
   const timeline = new Timeline(
     $<HTMLCanvasElement>('strip'),
     (minute) => {
+      if (state.live) track('zeitleiste');
       state.time = minute;
       state.live = false;
       syncControls();
@@ -214,6 +216,7 @@ async function main() {
   };
 
   const goLive = async () => {
+    track('live');
     const now = serviceNow();
     if (state.day.date !== now.date) await switchDay(now.date);
     state.live = true;
@@ -225,6 +228,7 @@ async function main() {
   $('go-live').addEventListener('click', goLive);
   $('day-today').addEventListener('click', goLive);
   $('day-yesterday').addEventListener('click', async () => {
+    track('gestern');
     await switchDay(addDays(serviceNow().date, -1));
     state.time = 6 * 60;
     state.speed = 300;
@@ -245,6 +249,7 @@ async function main() {
   // Rückblick: den bisherigen Tag ab 5 Uhr im Zeitraffer; im Rückblick führt derselbe Knopf zurück zu Live
   $('timeline-btn').addEventListener('click', () => {
     if (!state.live) return void goLive();
+    track('rueckblick');
     state.live = false;
     state.time = 5 * 60;
     state.speed = 300;
@@ -318,10 +323,13 @@ async function main() {
   layersEl.addEventListener('click', (e) => {
     const b = (e.target as HTMLElement).closest<HTMLElement>('[data-label], [data-kind]');
     if (!b) return;
-    if (b.dataset.label) prefs.labels = b.dataset.label as LabelMode;
-    else {
+    if (b.dataset.label) {
+      prefs.labels = b.dataset.label as LabelMode;
+      track('ebenen', { beschriftung: prefs.labels });
+    } else {
       const k = b.dataset.kind as TrainKind;
       prefs.show[k] = !prefs.show[k];
+      track('ebenen', { zugart: k, an: prefs.show[k] });
     }
     savePrefs();
     syncLayers();
@@ -399,10 +407,17 @@ async function main() {
     if (tab === 'analysis') renderPanels(netTrains());
     if (tab === 'trip' && !$<HTMLInputElement>('trip-time').value) $<HTMLInputElement>('trip-time').value = hhmm(state.time);
   }
-  for (const b of tabButtons) b.addEventListener('click', () => selectTab(b.dataset.tab as Tab, b.classList.contains('appnav-btn')));
+  for (const b of tabButtons)
+    b.addEventListener('click', () => {
+      track('tab', { tab: b.dataset.tab! });
+      selectTab(b.dataset.tab as Tab, b.classList.contains('appnav-btn'));
+    });
 
   function selectTrain(trip: number, fromList: boolean) {
-    if (state.selectedTrain !== trip) $('share-box').hidden = true;
+    if (state.selectedTrain !== trip) {
+      $('share-box').hidden = true;
+      track('zug', { gattung: net().model.trips[trip].category, quelle: fromList ? 'liste' : 'karte' });
+    }
     if (state.follow && state.follow.trip !== trip) endFollow();
     state.selectedTrain = trip;
     state.selectedStation = undefined;
@@ -422,6 +437,7 @@ async function main() {
 
   /** Bahnhof antippen (Karte, Suche, Nähe): Abfahrtstafel dieses Bahnhofs. */
   function selectStation(station: number, fromMap = false) {
+    track('abfahrten', { quelle: fromMap ? 'karte' : 'liste' });
     if (state.tab !== 'board') selectTab('board');
     else closeDetail();
     openBoard(station);
@@ -555,6 +571,7 @@ async function main() {
     const pain = r.trips[trip].known !== false && isPain(Math.max(s?.delay ?? 0, r.trips[trip].arr[last] - T.schedArr[last]));
     box.innerHTML = sharePanel(m, trip, s ? s.stop : 0, savedName(), pain);
     box.hidden = false;
+    track('teilen-dialog', { pain });
     updateShareCo2();
     box.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
   }
@@ -606,6 +623,7 @@ async function main() {
       try {
         await navigator.clipboard.writeText(url);
         result.textContent = 'Link kopiert.';
+        track('teilen', { weg: 'link-kopiert', pain });
       } catch {
         result.innerHTML = `Diesen Link teilen: <input class="share-url" readonly value="${esc(url)}" onclick="this.select()" />`;
       }
@@ -614,6 +632,7 @@ async function main() {
     if (navigator.share) {
       try {
         await navigator.share({ title: pain ? 'Share my Train Pain' : 'Share my Train', text, url });
+        track('teilen', { weg: 'teilen-menue', pain });
         result.textContent = 'Geteilt. Der Link zeigt die Fahrt bis zur Ankunft live.';
         return;
       } catch (e) {
@@ -623,6 +642,7 @@ async function main() {
     // Kein Teilen-Menü (z. B. Desktop-Browser): Nachricht mit Link kopieren, WhatsApp anbieten
     try {
       await navigator.clipboard.writeText(`${text}\n${url}`);
+      track('teilen', { weg: 'nachricht-kopiert', pain });
       result.innerHTML = `Nachricht mit Link kopiert, jetzt im Chat einfügen. <a href="https://wa.me/?text=${encodeURIComponent(`${text}\n${url}`)}" target="_blank" rel="noopener">Per WhatsApp senden</a>`;
     } catch {
       result.innerHTML = `Diesen Link teilen: <input class="share-url" readonly value="${esc(url)}" onclick="this.select()" />`;
@@ -661,6 +681,7 @@ async function main() {
       await state.day.regional.ensure([tile]);
       trip = find();
     }
+    track('folgen-link', { gefunden: trip >= 0 });
     if (trip < 0) return toast('Diese Zugfahrt wurde nicht gefunden. Vielleicht ist der Link von einem anderen Tag?');
     const m = net().model;
     const T = m.trips[trip];
@@ -681,6 +702,8 @@ async function main() {
   let searchLine: string | null = null;
   let lineLoading = false;
   let lineTimer: ReturnType<typeof setTimeout> | undefined;
+  let searchTrackTimer: ReturnType<typeof setTimeout> | undefined;
+  let searchTracked = '';
   /** Kacheln einer Linie laden, die nächsten zum Standort bzw. zur Kartenmitte zuerst (höchstens 24) */
   async function loadLine(line: LineQuery): Promise<boolean> {
     lineLoading = true;
@@ -724,6 +747,16 @@ async function main() {
       lineTimer = setTimeout(() => void loadLine(line).then(() => searchLine === lineKeyQ && renderSearch(true)), 350);
     }
     const html = res.stations.map((st) => stationRow(m, st)).join('') + res.trips.map((h) => searchHitRow(m, r, h)).join('');
+    // Zählen, sobald die Eingabe kurz ruht (ohne Suchtext; die Liste wird laufend neu gezeichnet)
+    if (q !== searchTracked) {
+      searchTracked = q;
+      clearTimeout(searchTrackTimer);
+      searchTrackTimer = setTimeout(() => {
+        const now = search(net().model, net().result, q, state.time);
+        const kind = line ? 'linie' : now.stations.length > 1 && now.trips.length ? 'strecke' : 'bahnhof';
+        track('suche', { art: kind, treffer: now.stations.length + now.trips.length > 0 });
+      }, 1500);
+    }
     if (!html && line && lineLoading) setHtml('search-results', emptyRow('Suche Regionalzüge …'), force);
     else setHtml('search-results', html || emptyRow('Nichts gefunden. Tipp: Bahnhofsname ohne „Hbf“ oder nur die Liniennummer.'), force);
   }
@@ -772,6 +805,7 @@ async function main() {
           tripFrom = near.i;
         }
         if (!silent) {
+          track('standort', { ok: true });
           map.ensureVisible(state.user.lon, state.user.lat, sheet.visibleHeight(), 3);
           if (near) toast(`Nächster Bahnhof: ${state.day.model.stations[near.i].name} (${near.d < 1 ? `${Math.round(near.d * 1000)} m` : `${near.d.toFixed(1).replace('.', ',')} km`})`);
         }
@@ -779,6 +813,7 @@ async function main() {
       (err) => {
         locateBtn.classList.remove('is-busy');
         if (silent) return;
+        track('standort', { ok: false });
         toast(
           err.code === err.PERMISSION_DENIED
             ? 'Standort ist blockiert. Erlaube ihn in den Browser-Einstellungen für diese Seite und tippe erneut auf den Knopf.'
@@ -849,16 +884,16 @@ async function main() {
   }
   function renderBoardChips() {
     const m = state.day.model;
-    const chips: { i: number; meta: string }[] = [];
-    const add = (i: number | undefined, meta = '') => i !== undefined && !chips.some((c) => c.i === i) && chips.push({ i, meta });
-    if (state.user) for (const x of nearestStations(state.user, 3)) add(x.i, x.d < 1 ? `${Math.round(x.d * 1000)} m` : `${x.d.toFixed(1).replace('.', ',')} km`);
-    for (const name of loadRecent()) add(stationByName(name), 'zuletzt');
+    const chips: { i: number; meta: string; src: string }[] = [];
+    const add = (i: number | undefined, src: string, meta = '') => i !== undefined && !chips.some((c) => c.i === i) && chips.push({ i, meta, src });
+    if (state.user) for (const x of nearestStations(state.user, 3)) add(x.i, 'nah', x.d < 1 ? `${Math.round(x.d * 1000)} m` : `${x.d.toFixed(1).replace('.', ',')} km`);
+    for (const name of loadRecent()) add(stationByName(name), 'zuletzt', 'zuletzt');
     // Große Bahnhöfe nur als Einstieg, solange es weder Standort noch Verlauf gibt – sonst wirken sie wie „in der Nähe“
-    if (!chips.length) for (const name of BIG_STATIONS) add(stationByName(name));
+    if (!chips.length) for (const name of BIG_STATIONS) add(stationByName(name), 'beliebt');
     const locate = state.user ? '' : `<button class="chip" data-locate>◎ In meiner Nähe</button>`;
     setHtml(
       'board-chips',
-      locate + chips.map((c) => `<button class="chip${c.i === state.boardStation ? ' is-active' : ''}" data-station="${c.i}">${esc(shortName(m.stations[c.i].name))}${c.meta ? `<span class="meta">${c.meta}</span>` : ''}</button>`).join(''),
+      locate + chips.map((c) => `<button class="chip${c.i === state.boardStation ? ' is-active' : ''}" data-station="${c.i}" data-src="${c.src}">${esc(shortName(m.stations[c.i].name))}${c.meta ? `<span class="meta">${c.meta}</span>` : ''}</button>`).join(''),
       true,
     );
   }
@@ -883,6 +918,7 @@ async function main() {
     if (e.key !== 'Enter') return;
     const first = boardSuggest.querySelector<HTMLElement>('[data-station]');
     if (first) {
+      track('abfahrten', { quelle: 'suche' });
       openBoard(+first.dataset.station!, true);
       boardInput.blur();
     }
@@ -891,6 +927,7 @@ async function main() {
     const li = (e.target as HTMLElement).closest<HTMLElement>('[data-station]');
     if (!li) return;
     e.preventDefault();
+    track('abfahrten', { quelle: 'suche' });
     openBoard(+li.dataset.station!, true);
     boardInput.blur();
   });
@@ -898,7 +935,10 @@ async function main() {
     const b = (e.target as HTMLElement).closest<HTMLElement>('[data-station], [data-locate]');
     if (!b) return;
     if (b.dataset.locate !== undefined) locate(false);
-    else openBoard(+b.dataset.station!, true);
+    else {
+      track('abfahrten', { quelle: b.dataset.src ?? 'chip' });
+      openBoard(+b.dataset.station!, true);
+    }
   });
   for (const mode of ['dep', 'arr'] as const) {
     $(`board-${mode}`).addEventListener('click', () => {
@@ -1007,6 +1047,7 @@ async function main() {
     await Promise.all([a, b].map((st) => day.regional.ensure(tilesAround(st.lat, st.lon, 1))));
     const n = day.regional.network(day.model, day.result);
     lastJourneys = searchJourneys(n.model, n.result, tripFrom, tripTo, after - 5, now);
+    track('reise', { verbindungen: lastJourneys.journeys.length });
     renderJourneys();
   }
   function renderJourneys() {
@@ -1080,6 +1121,7 @@ async function main() {
       <button class="ghost-btn" data-show-line="${esc(line)}">Züge von ${esc(line)} auf der Karte</button>`;
   };
   const openInsights = () => {
+    track('lessons');
     $('report-eyebrow').textContent = 'Lessons learned für die DB';
     $('report-title').textContent = 'Was die DB lernen kann';
     overlay.hidden = false;
@@ -1089,6 +1131,7 @@ async function main() {
   };
   $('open-insights').addEventListener('click', openInsights);
   const openAbout = () => {
+    track('seite', { seite: 'ueber' });
     $('report-eyebrow').textContent = 'Share my Train';
     $('report-title').textContent = 'Über, Daten & Datenschutz';
     $('report-share').hidden = true;
@@ -1098,6 +1141,7 @@ async function main() {
     $('report-body').parentElement!.scrollTop = 0;
   };
   const openPrivacy = () => {
+    track('seite', { seite: 'datenschutz' });
     $('report-eyebrow').textContent = 'Share my Train';
     $('report-title').textContent = 'Datenschutzerklärung';
     $('report-share').hidden = true;
@@ -1105,8 +1149,21 @@ async function main() {
     overlay.style.setProperty('--c', 'var(--accent)');
     $('report-body').innerHTML = privacyPage();
     $('report-body').parentElement!.scrollTop = 0;
+    syncTrackingToggle();
   };
+  /** Widerspruch gegen die Nutzungsstatistik (Datenschutzerklärung) */
+  const syncTrackingToggle = () => {
+    const off = trackingDisabled();
+    document.querySelectorAll('[data-tracking-state]').forEach((el) => (el.textContent = off ? 'Die Statistik ist für dieses Gerät ausgeschaltet.' : 'Die Statistik ist eingeschaltet.'));
+    document.querySelectorAll('[data-tracking-toggle]').forEach((el) => (el.textContent = off ? 'Wieder einschalten' : 'Statistik ausschalten'));
+  };
+  document.addEventListener('click', (e) => {
+    if (!(e.target as HTMLElement).closest('[data-tracking-toggle]')) return;
+    setTrackingDisabled(!trackingDisabled());
+    syncTrackingToggle();
+  });
   const openImprint = () => {
+    track('seite', { seite: 'impressum' });
     $('report-eyebrow').textContent = 'Share my Train';
     $('report-title').textContent = 'Impressum';
     $('report-share').hidden = true;
@@ -1131,6 +1188,7 @@ async function main() {
     url.hash = '';
     const data = { title: 'Was die DB lernen kann – Share my Train', text: 'Lessons learned für die Bahn aus echten Ist-Daten', url: url.toString() };
     try {
+      track('teilen', { weg: 'bericht' });
       if (navigator.share) await navigator.share(data);
       else {
         await navigator.clipboard.writeText(data.url);
@@ -1228,6 +1286,7 @@ async function main() {
     overlay.style.setProperty('--c', out.color);
   };
   $('open-report').addEventListener('click', () => {
+    track('tagesbericht');
     const day = state.day;
     $('report-share').hidden = true;
     $('report-eyebrow').textContent = 'Tagesabschluss';
