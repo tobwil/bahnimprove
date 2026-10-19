@@ -1809,10 +1809,152 @@ a.ghost-btn {
   font-size: 14px;
 }
 
-.detail-locate {
-  margin-top: 10px;
-  padding: 7px 12px;
-  font-size: 13px;
+.detail-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.ghost-btn--accent {
+  color: var(--lamp);
+  border-color: color-mix(in srgb, var(--lamp) 55%, transparent);
+  background: color-mix(in srgb, var(--lamp) 10%, transparent);
+}
+
+/* ---------- Live mitfahren ---------- */
+.share-card {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 16px;
+  padding: 14px;
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--lamp) 7%, var(--ink-2));
+  border: 1px solid color-mix(in srgb, var(--lamp) 45%, transparent);
+}
+
+.share-title {
+  margin: 0;
+  font-family: var(--f-display);
+  font-weight: 400;
+  font-size: 22px;
+  color: var(--lamp);
+}
+
+.share-card .fine {
+  margin: 0;
+}
+
+.field select {
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 16px;
+  color: var(--text);
+  padding: 2px 0;
+  outline: none;
+  min-width: 0;
+}
+
+.field select option {
+  background: var(--ink-2);
+}
+
+.share-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.share-actions .cta {
+  width: auto;
+  flex: 1;
+}
+
+.share-url {
+  width: 100%;
+  margin-top: 6px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid var(--line-hi);
+  background: var(--ink-1);
+  font-family: var(--f-mono);
+  font-size: 12px;
+}
+
+.follow {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 16px;
+  padding: 16px;
+  border-radius: 18px;
+  background:
+    radial-gradient(120% 140% at 0% 0%, color-mix(in srgb, var(--c) 20%, transparent), transparent 60%),
+    var(--ink-2);
+  border: 1px solid color-mix(in srgb, var(--c) 50%, transparent);
+}
+
+.follow .eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.follow-head {
+  margin: 0;
+  font-size: 20px;
+  line-height: 1.3;
+  text-wrap: balance;
+}
+
+.follow-head b {
+  font-family: var(--f-display);
+  font-weight: 400;
+  font-size: 1.25em;
+  color: var(--c);
+}
+
+.follow-delay {
+  margin: 0;
+  color: var(--c);
+  font-weight: 500;
+}
+
+.follow-bar {
+  position: relative;
+  height: 6px;
+  margin: 8px 4px 0;
+  background: var(--ink-3);
+}
+
+.follow-bar span {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: var(--lamp);
+}
+
+.follow-bar i {
+  position: absolute;
+  top: -5px;
+  width: 14px;
+  height: 16px;
+  margin-left: -7px;
+  background: var(--c);
+  border: 2px solid var(--text);
+  box-shadow: 0 0 12px var(--c);
+}
+
+.follow-ends {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.follow-where {
+  margin: 0;
+  color: var(--muted);
+  font-size: 14px;
 }
 
 /* ---------- Ebenen: Filter und Legende ---------- */
@@ -2201,6 +2343,11 @@ a.ghost-btn {
 
   .sheet.is-detail .timeline {
     padding-top: 4px;
+  }
+
+  /* Empfänger eines geteilten Links brauchen keine Zeitleiste */
+  .sheet.is-follow .timeline {
+    display: none;
   }
 }
 

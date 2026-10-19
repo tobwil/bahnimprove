@@ -23,12 +23,13 @@ import { gradeOf, renderReport } from './ui/report.ts';
 import { MapGestures } from './ui/gestures.ts';
 import { Sheet } from './ui/sheet.ts';
 import { Timeline } from './ui/timeline.ts';
-import { emptyRow, hotspotRow, incidentRow, journeyCard, journeyVerdict, departureBoard, searchHitRow, stationRow, trainDetail, trainRow, type Buildup } from './ui/views.ts';
+import { emptyRow, hotspotRow, incidentRow, journeyCard, journeyVerdict, departureBoard, followCard, searchHitRow, sharePanel, stationRow, trainDetail, trainRow, type Buildup } from './ui/views.ts';
 import { aggregateDay, findings, mergeDays, type Insights } from './insights/aggregate.ts';
 import { searchJourneys, type JourneyResult } from './sim/journey.ts';
 import { matchStations, search } from './sim/search.ts';
 import { insightsPage, insightsTeaser } from './ui/insights.ts';
 import { aboutPage } from './ui/about.ts';
+import { cleanName, followStatus, targetIndexOf } from './share/status.ts';
 
 /** Ab dieser Uhrzeit beginnt ein neuer Verkehrstag (Nachtzüge laufen über Mitternacht). */
 const DAY_ROLLOVER = 180;
@@ -148,7 +149,11 @@ async function main() {
     boardMode: 'dep' as 'dep' | 'arr',
     user: undefined as { lat: number; lon: number } | undefined,
     hotspots: [] as LiveHotspot[],
+    /** Geteilte Zugfahrt, der diese Ansicht folgt (Empfänger eines Links) */
+    follow: undefined as { trip: number; target: number; name: string } | undefined,
   };
+  /** Karte folgt dem Zug, bis jemand selbst schiebt */
+  let followCamera = false;
 
   /** Fern- und geladener Regionalverkehr als ein Netz – für Karte, Suche, Reise und Tafeln. */
   const net = () => state.day.regional.network(state.day.model, state.day.result);
@@ -246,6 +251,7 @@ async function main() {
   // --- Karte: Zoom, Pan, Auswahl ---------------------------------------------
   const gestures = new MapGestures(canvas, {
     pan: (dx, dy) => {
+      followCamera = false;
       const [x0, y0] = map.toMapPixel(0, 0);
       const [x1, y1] = map.toMapPixel(dx, dy);
       map.pan(x0 - x1, y0 - y1);
@@ -389,6 +395,8 @@ async function main() {
   for (const b of tabButtons) b.addEventListener('click', () => selectTab(b.dataset.tab as Tab, b.classList.contains('appnav-btn')));
 
   function selectTrain(trip: number, fromList: boolean) {
+    if (state.selectedTrain !== trip) $('share-box').hidden = true;
+    if (state.follow && state.follow.trip !== trip) endFollow();
     state.selectedTrain = trip;
     state.selectedStation = undefined;
     showView('detail');
@@ -416,6 +424,8 @@ async function main() {
   }
 
   function closeDetail() {
+    if (state.follow) endFollow();
+    $('share-box').hidden = true;
     state.selectedTrain = undefined;
     state.selectedStation = state.tab === 'board' ? state.boardStation : undefined;
     showView(state.tab);
@@ -459,11 +469,18 @@ async function main() {
     if (state.selectedTrain !== undefined) {
       const id = state.selectedTrain;
       setHtml('detail', trainDetail(m, r, id, trainAt(m, r, id, state.time), state.time, buildup(id)), force);
+      const f = state.follow;
+      $('follow-card').hidden = !f || f.trip !== id;
+      $('sheet').classList.toggle('is-follow', !!f && f.trip === id);
+      if (f && f.trip === id) setHtml('follow-card', followCard(followStatus(m.stations, m.trips[id], r.trips[id], f.target, state.time), f.name, state.time), force);
     }
   }
   $('detail').addEventListener('click', (e) => {
+    const sh = (e.target as HTMLElement).closest<HTMLElement>('[data-share-train]');
+    if (sh) return openShare(+sh.dataset.shareTrain!);
     const loc = (e.target as HTMLElement).closest<HTMLElement>('[data-locate-train]');
     if (loc) {
+      followCamera = !!state.follow;
       const m = net().model;
       const s = trainAt(m, net().result, +loc.dataset.locateTrain!, state.time);
       if (!s) return;
@@ -489,6 +506,116 @@ async function main() {
   $('search-results').addEventListener('click', onRowClick);
   $('nearby').addEventListener('click', onRowClick);
   $<HTMLInputElement>('search').addEventListener('input', () => renderSearch(true));
+
+  // --- Live mitfahren: eigene Fahrt teilen, geteilte Fahrt verfolgen ------------------
+  const NAME_KEY = 'bahnimprove.share.name';
+  const savedName = () => {
+    try {
+      return localStorage.getItem(NAME_KEY) ?? '';
+    } catch {
+      return '';
+    }
+  };
+  let shareTrip: number | undefined;
+  function openShare(trip: number) {
+    const box = $('share-box');
+    if (!box.hidden && shareTrip === trip) {
+      box.hidden = true;
+      return;
+    }
+    shareTrip = trip;
+    const { model: m, result: r } = net();
+    const s = trainAt(m, r, trip, state.time);
+    box.innerHTML = sharePanel(m, trip, s ? s.stop : 0, savedName());
+    box.hidden = false;
+    box.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  }
+  /** Link zur geteilten Fahrt: Tag, Zug (GTFS), Ausstieg, Name und bei Regionalzügen die Kachel */
+  function shareLink(trip: number, target: number, name: string): string {
+    const n = net();
+    const T = n.model.trips[trip];
+    const url = new URL(`/zug/${state.day.date}/${encodeURIComponent(T.gtfsId)}`, location.origin);
+    url.searchParams.set('bis', n.model.stations[T.stops[target]].name);
+    if (name) url.searchParams.set('von', name);
+    const tile = trip >= n.fvCount ? state.day.regional.tileOf(trip - n.fvCount) : undefined;
+    if (tile) url.searchParams.set('k', tile);
+    return url.toString();
+  }
+  async function doShare(copyOnly: boolean) {
+    if (shareTrip === undefined) return;
+    const name = cleanName($<HTMLInputElement>('share-name').value);
+    try {
+      localStorage.setItem(NAME_KEY, name);
+    } catch {
+      // ohne Speicher eben jedes Mal eintippen
+    }
+    const target = +$<HTMLSelectElement>('share-to').value;
+    const m = net().model;
+    const T = m.trips[shareTrip];
+    const url = shareLink(shareTrip, target, name);
+    const text = `Ich sitze im ${T.line} nach ${shortName(m.stations[T.stops[target]].name)}. Hier siehst du live, wo der Zug gerade ist und wann ich ankomme:`;
+    const result = $('share-result');
+    if (!copyOnly && navigator.share) {
+      try {
+        await navigator.share({ title: `${T.line} live mitfahren`, text, url });
+        result.textContent = 'Geteilt. Der Link zeigt die Fahrt bis zur Ankunft live.';
+        return;
+      } catch (e) {
+        if ((e as Error).name === 'AbortError') return;
+      }
+    }
+    try {
+      await navigator.clipboard.writeText(`${text} ${url}`);
+      result.innerHTML = `Link kopiert, jetzt einfach im Chat einfügen. <a href="https://wa.me/?text=${encodeURIComponent(`${text} ${url}`)}" target="_blank" rel="noopener">Per WhatsApp senden</a>`;
+    } catch {
+      result.innerHTML = `Diesen Link teilen: <input class="share-url" readonly value="${esc(url)}" onclick="this.select()" />`;
+    }
+  }
+  $('share-box').addEventListener('click', (e) => {
+    const t = e.target as HTMLElement;
+    if (t.closest('#share-go')) void doShare(false);
+    else if (t.closest('#share-copy')) void doShare(true);
+  });
+
+  function endFollow() {
+    state.follow = undefined;
+    followCamera = false;
+    $('follow-card').hidden = true;
+    $('sheet').classList.remove('is-follow');
+    if (location.pathname.startsWith('/zug/')) history.replaceState(null, '', '/');
+  }
+  /** Geöffneter Link /zug/TAG/ZUG?bis=…&von=…&k=…: Zug suchen, auswählen und ihm folgen */
+  async function startFollow(date: string, gtfsId: string, params: URLSearchParams) {
+    if (state.day.date !== date) {
+      try {
+        await switchDay(date);
+      } catch {
+        return toast('Diese Fahrt liegt außerhalb des aktuellen Fahrplans.');
+      }
+      if (date !== serviceNow().date) {
+        state.live = false;
+        state.playing = false;
+      }
+    }
+    const find = () => net().model.trips.findIndex((T) => T.gtfsId === gtfsId);
+    let trip = find();
+    const tile = params.get('k');
+    if (trip < 0 && tile && /^-?\d+_-?\d+$/.test(tile)) {
+      await state.day.regional.ensure([tile]);
+      trip = find();
+    }
+    if (trip < 0) return toast('Diese Zugfahrt wurde nicht gefunden. Vielleicht ist der Link von einem anderen Tag?');
+    const m = net().model;
+    const T = m.trips[trip];
+    state.follow = { trip, target: targetIndexOf(m.stations, T, params.get('bis')), name: cleanName(params.get('von')) };
+    if (!state.live) state.time = Math.min(net().result.trips[trip].arr[state.follow.target] + 1, 1440 + DAY_ROLLOVER);
+    syncControls();
+    followCamera = true;
+    selectTrain(trip, true);
+    // selectTrain beendet das Folgen nicht für denselben Zug; Karte und Sheet für Empfänger
+    if (!sheet.docked) sheet.set('half');
+    renderDetail(true);
+  }
 
   // --- Suche -------------------------------------------------------------------
   let searchLoaded: number | undefined;
@@ -1061,6 +1188,14 @@ async function main() {
         void d.regional.ensure(tilesInBounds({ minLat: Math.min(lat0, lat1), maxLat: Math.max(lat0, lat1), minLon: lon0, maxLon: lon1 }, 24));
       }
       renderPanels(trains);
+      if (state.follow && followCamera) {
+        const s = trains.find((t) => t.trip === state.follow!.trip);
+        if (s) {
+          const T = n.model.trips[s.trip];
+          const a = n.model.stations[T.stops[s.stop]], b = n.model.stations[T.stops[Math.min(s.stop + 1, T.stops.length - 1)]];
+          map.ensureVisible(a.lon + (b.lon - a.lon) * s.progress, a.lat + (b.lat - a.lat) * s.progress, sheet.visibleHeight(), 2.5);
+        }
+      }
     }
     const maxHot = Math.max(30, ...state.hotspots.map((h) => h.minutes));
     map.draw({
@@ -1084,6 +1219,8 @@ async function main() {
     openInsights();
     void loadInsights().then(() => !overlay.hidden && insights && ($('report-body').innerHTML = insightsPage(insights, lineInfo)));
   } else if (location.hash === '#abfahrten') selectTab('board');
+  const followLink = location.pathname.match(/^\/zug\/(\d{8})\/([^/]+)\/?$/);
+  if (followLink) void startFollow(followLink[1], decodeURIComponent(followLink[2]), new URLSearchParams(location.search));
   watchHostBadge(layoutMap);
   layoutMap();
   syncControls();

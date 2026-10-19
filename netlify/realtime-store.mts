@@ -6,9 +6,9 @@ import type { RegionalIndex, RegionalTile } from '../src/data/regional.ts';
 import { aggregateDay, findings, mergeDays, type DayAgg, type Insights } from '../src/insights/aggregate.ts';
 import { extractGroups, fetchFeed } from '../src/realtime/feed.ts';
 import { mergeDay, type RealtimeDay } from '../src/realtime/types.ts';
-import { buildDayModel } from '../src/sim/model.ts';
-import { observedResult } from '../src/sim/real.ts';
-import type { Timetable } from '../src/sim/types.ts';
+import { buildDayModel, categoryOf, type DayModel } from '../src/sim/model.ts';
+import { berlinMidnightEpoch, observeTrip, observedResult } from '../src/sim/real.ts';
+import type { Timetable, TimetableStation, Trip, TripResult } from '../src/sim/types.ts';
 
 /** Echtzeit je Verkehrstag: Fernverkehr unter "YYYYMMDD", Regionalverkehr unter "rv/YYYYMMDD". */
 export const store = () => getStore('realtime');
@@ -162,4 +162,52 @@ export async function collectReasons(): Promise<{ date: string; added: number; f
 export async function reasonDays(): Promise<ReasonDay[]> {
   const keys = (await reasonStore().list()).blobs.map((b) => b.key).sort().slice(-WINDOW_DAYS);
   return (await Promise.all(keys.map((k) => reasonStore().get(k, { type: 'json' })))).filter(Boolean) as ReasonDay[];
+}
+
+// --- Live mitfahren ------------------------------------------------------------
+
+let modelCache: { date: string; version?: string; model: DayModel } | null = null;
+let fvRtCache: { at: number; date: string; day: RealtimeDay | null } | null = null;
+
+/** Eine einzelne Fahrt mit Ist-Zeiten (Fern- oder Regionalverkehr) – für geteilte Zugfahrten. */
+export async function tripWithRealtime(date: string, gtfsId: string, tileHint?: string): Promise<{ stations: TimetableStation[]; trip: Trip; result: TripResult } | null> {
+  const tt = await timetable();
+  const midnight = berlinMidnightEpoch(date);
+  if (tt.dates.includes(date)) {
+    if (!modelCache || modelCache.date !== date || modelCache.version !== tt.version) modelCache = { date, version: tt.version, model: buildDayModel(tt, date) };
+    const T = modelCache.model.trips.find((t) => t.gtfsId === gtfsId);
+    if (T) {
+      if (!fvRtCache || fvRtCache.date !== date || Date.now() - fvRtCache.at > 60_000) {
+        const text = await store().get(date, { type: 'text' });
+        fvRtCache = { at: Date.now(), date, day: text ? (JSON.parse(text) as RealtimeDay) : null };
+      }
+      return { stations: tt.stations, trip: T, result: observeTrip(T, fvRtCache.day?.trips[gtfsId], midnight) };
+    }
+  }
+  // Regionalverkehr: Kachel aus dem Link oder aus der Zuordnung des nächtlichen Jobs
+  const tiles = tileHint && /^-?\d+_-?\d+$/.test(tileHint) ? [tileHint] : ((await rvTripTiles())?.map[gtfsId] ?? []);
+  for (const key of tiles.slice(0, 3)) {
+    const tile = await regionalTile(date, key);
+    const t = tile?.trips.find((x) => x.id === gtfsId);
+    if (!tile || !t) continue;
+    const line = t.line.replace(/^(RE|RB|S|IRE|MEX|ALX|FEX|IC)(\d)/, '$1 $2');
+    const T: Trip = {
+      id: 0,
+      gtfsId,
+      seqs: t.seqs ?? t.stops.map((_, i) => i),
+      line,
+      category: /^\d+$/.test(t.line) ? 'RB' : categoryOf(line),
+      operator: tile.ops[t.op] ?? '',
+      stops: t.stops,
+      schedArr: t.stops.map((_, i) => t.times[i * 2]),
+      schedDep: t.stops.map((_, i) => t.times[i * 2 + 1]),
+    };
+    return { stations: tt.stations, trip: T, result: observeTrip(T, tile.rt?.trips[gtfsId], midnight) };
+  }
+  return null;
+}
+
+/** Minute im Verkehrstag `date` für einen Zeitpunkt (über Mitternacht > 1440). */
+export function minuteOfServiceDay(date: string, now = Date.now()): number {
+  return (now / 1000 - berlinMidnightEpoch(date)) / 60;
 }

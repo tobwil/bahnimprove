@@ -5,6 +5,7 @@ import type { DayModel } from '../sim/model.ts';
 import { INCIDENT_LABEL, fmtDelay, hhmm, incidentPlace, shortName } from '../sim/text.ts';
 import type { Incident, SimResult } from '../sim/types.ts';
 import { OBS_ARR, OBS_DEP } from '../sim/real.ts';
+import type { FollowStatus } from '../share/status.ts';
 import { delayColor, esc } from './dom.ts';
 
 export const lineBadge = (m: DayModel, trip: number) => {
@@ -119,7 +120,10 @@ export function trainDetail(m: DayModel, r: SimResult, trip: number, s: TrainSta
       <div class="detail-title">${lineBadge(m, trip)}<span class="detail-route">${esc(endpoints(m, trip))}</span></div>
       <div class="big-delay" style="--c:${c}">${R.canceled ? 'Ausfall' : unknown ? '–' : `${fmtDelay(delayNow)}<small>Min</small>`}</div>
       <div class="detail-meta">${esc(status)} · ${esc(T.operator)}</div>
-      ${s ? `<button class="ghost-btn detail-locate" data-locate-train="${trip}">◎ Auf der Karte zeigen</button>` : ''}
+      <div class="detail-actions">
+        ${s ? `<button class="ghost-btn" data-locate-train="${trip}">◎ Auf der Karte zeigen</button>` : ''}
+        ${!R.canceled && now < R.arr[n - 1] ? `<button class="ghost-btn ghost-btn--accent" data-share-train="${trip}">Live mitfahren lassen</button>` : ''}
+      </div>
     </div>
     ${unknown || R.canceled ? '' : `<div class="profile">${profileSvg(m, r, trip, now)}</div>`}
     ${
@@ -338,4 +342,58 @@ export function journeyVerdict(m: DayModel, res: JourneyResult): string {
   }
   const tr = rec.transfers.length ? ` Umstieg${rec.transfers.length > 1 ? 'e' : ''} ${rec.transfers.map((t) => `${shortName(m.stations[t.station].name)} ${Math.round(t.probability * 100)} %`).join(', ')}.` : ' Ohne Umstieg.';
   return `<div class="verdict"><strong>${esc(recText)} passt.</strong>Voraussichtliche Ankunft ${hhmm(rec.predArr)}.${esc(tr)}</div>`;
+}
+
+// --- Live mitfahren --------------------------------------------------------------
+
+/** Formular zum Teilen der eigenen Zugfahrt: Ausstieg wählen, Name optional. */
+export function sharePanel(m: DayModel, trip: number, fromStop: number, name: string): string {
+  const T = m.trips[trip];
+  const options = T.stops
+    .map((s, i) => ({ s, i }))
+    .filter(({ i }) => i > fromStop)
+    .map(({ s, i }) => `<option value="${i}"${i === T.stops.length - 1 ? ' selected' : ''}>${esc(m.stations[s].name)} · ${hhmm(T.schedArr[i])}</option>`)
+    .join('');
+  return `<section class="share-card">
+    <h3 class="share-title">Live mitfahren lassen</h3>
+    <p class="fine">Schick deinen Liebsten einen Link: Sie sehen live, wo dein Zug gerade ist und wann du ankommst. Geteilt wird nur der Zug, nicht dein Standort.</p>
+    <label class="field"><span class="eyebrow">Ich steige aus in</span><select id="share-to">${options}</select></label>
+    <label class="field"><span class="eyebrow">Dein Name (optional)</span><input id="share-name" type="text" maxlength="20" placeholder="z. B. Tobi" autocomplete="given-name" value="${esc(name)}" /></label>
+    <div class="share-actions">
+      <button class="cta cta--small" id="share-go">Link teilen</button>
+      <button class="ghost-btn" id="share-copy">Link kopieren</button>
+    </div>
+    <p class="fine" id="share-result" role="status"></p>
+  </section>`;
+}
+
+/** Ansicht für Empfänger eines geteilten Links */
+export function followCard(st: FollowStatus, who: string, stamp: number): string {
+  const c = st.state === 'canceled' ? 'var(--bad)' : st.known ? delayColor(st.delay) : 'var(--accent)';
+  const subject = who ? esc(who) : 'Der Zug';
+  const head =
+    st.state === 'canceled'
+      ? `${esc(st.line)} nach ${esc(st.to)} fällt aus`
+      : st.state === 'arrived'
+        ? `${subject} ist um <b>${hhmm(st.estArr)}</b> in <b>${esc(st.target)}</b> angekommen`
+        : `${subject} kommt um <b>${hhmm(st.estArr)}</b> in <b>${esc(st.target)}</b> an`;
+  const delay =
+    st.state === 'canceled'
+      ? 'Bitte nach einer anderen Verbindung schauen.'
+      : !st.known
+        ? `Planmäßig ${hhmm(st.schedArr)}, noch keine Echtzeitdaten`
+        : st.delay >= 1
+          ? `${st.delay} Min später als geplant (${hhmm(st.schedArr)})`
+          : 'Pünktlich';
+  const left = st.minutesLeft >= 60 ? `${Math.floor(st.minutesLeft / 60)} h ${st.minutesLeft % 60} Min` : `${st.minutesLeft} Min`;
+  const pct = (st.progress * 100).toFixed(1);
+  return `<section class="follow" style="--c:${c}">
+    <span class="eyebrow"><span class="live-dot"></span> Live mitfahren · ${esc(st.line)}</span>
+    <p class="follow-head">${head}</p>
+    <p class="follow-delay">${delay}</p>
+    <div class="follow-bar" role="img" aria-label="${Math.round(st.progress * 100)} % der Strecke geschafft"><span style="width:${pct}%"></span><i style="left:${pct}%"></i></div>
+    <div class="follow-ends"><span>${esc(st.from)}</span><span>${esc(st.target)}</span></div>
+    <p class="follow-where">${st.state === 'running' || st.state === 'before' ? `${esc(st.where.charAt(0).toUpperCase() + st.where.slice(1))}${st.next && st.next.name !== st.target ? ` · nächster Halt ${esc(st.next.name)} ${hhmm(st.next.time)}` : ''} · noch ${left}` : esc(st.where.charAt(0).toUpperCase() + st.where.slice(1))}</p>
+    <p class="fine">Aktualisiert sich automatisch, Stand ${hhmm(stamp)}. Geteilt wurde nur der Zug, kein Standort.</p>
+  </section>`;
 }

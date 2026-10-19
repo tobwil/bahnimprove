@@ -2,6 +2,8 @@
 <html lang="de">
   <head>
     <meta charset="UTF-8" />
+    <!-- Geteilte Zugfahrten liegen unter /zug/…: Daten und Assets immer relativ zur Wurzel -->
+    <base href="/" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="theme-color" content="#070a14" />
     <title>Bahnimprove Leitstand</title>
@@ -212,6 +214,8 @@
 
           <div class="view" id="view-detail" hidden>
             <button id="detail-back" class="back-btn">← Zurück</button>
+            <div id="follow-card" hidden></div>
+            <div id="share-box" hidden></div>
             <div id="detail"></div>
           </div>
 

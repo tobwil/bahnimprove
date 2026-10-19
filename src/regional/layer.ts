@@ -146,6 +146,12 @@ export class RegionalLayer {
     return net;
   }
 
+  /** Kachel, aus der ein Regionalzug stammt (lokale Nummer = Netz-Nummer − fvCount) */
+  tileOf(localId: number): string | undefined {
+    for (const [key, t] of this.tiles) if (t.trips.includes(localId)) return key;
+    return undefined;
+  }
+
   stationsCount() {
     return this.stations.length;
   }
