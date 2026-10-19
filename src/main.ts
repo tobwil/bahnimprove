@@ -462,6 +462,17 @@ async function main() {
     }
   }
   $('detail').addEventListener('click', (e) => {
+    const loc = (e.target as HTMLElement).closest<HTMLElement>('[data-locate-train]');
+    if (loc) {
+      const m = net().model;
+      const s = trainAt(m, net().result, +loc.dataset.locateTrain!, state.time);
+      if (!s) return;
+      const T = m.trips[s.trip];
+      const a = m.stations[T.stops[s.stop]], b = m.stations[T.stops[Math.min(s.stop + 1, T.stops.length - 1)]];
+      if (sheet.snap === 'full') sheet.set('half');
+      requestAnimationFrame(() => map.ensureVisible(a.lon + (b.lon - a.lon) * s.progress, a.lat + (b.lat - a.lat) * s.progress, sheet.visibleHeight(), 3, true));
+      return;
+    }
     const row = (e.target as HTMLElement).closest<HTMLElement>('[data-trip]');
     if (row) selectTrain(+row.dataset.trip!, true);
   });

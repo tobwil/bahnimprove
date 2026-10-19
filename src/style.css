@@ -1809,6 +1809,12 @@ a.ghost-btn {
   font-size: 14px;
 }
 
+.detail-locate {
+  margin-top: 10px;
+  padding: 7px 12px;
+  font-size: 13px;
+}
+
 /* ---------- Ebenen: Filter und Legende ---------- */
 .tool-btn.is-active {
   color: var(--lamp);

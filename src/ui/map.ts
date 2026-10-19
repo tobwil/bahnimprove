@@ -49,6 +49,8 @@ const C = {
   labelDim: px('#8d98b8'),
   labelShadow: px('#05070f'),
   route: px('#ffc56b'),
+  routePast: px('#6e5530'),
+  tagText: px('#05070f'),
   routeGlow: px('#ff9e3d'),
   select: px('#ffffff'),
   user: px('#4aa8ff'),
@@ -65,6 +67,16 @@ export const DELAY_COLORS = [
 const TRAIN_PX = DELAY_COLORS.map((d) => ({ max: d.max, head: px(d.color), tail: px(d.tail) }));
 /** Fahrt ohne Echtzeitdaten */
 const TRAIN_UNKNOWN = { max: Infinity, head: px('#7a84a8'), tail: px('#353f5f') };
+
+/** Farbe a zu t Anteilen in Richtung b gemischt */
+function mixHex(a: string, b: string, t: number): string {
+  const pa = parseInt(a.slice(1), 16), pb = parseInt(b.slice(1), 16);
+  const ch = (sh: number) => Math.round(((pa >> sh) & 255) * (1 - t) + ((pb >> sh) & 255) * t);
+  return `#${((ch(16) << 16) | (ch(8) << 8) | ch(0)).toString(16).padStart(6, '0')}`;
+}
+/** Im Fokus auf einen Zug treten alle anderen zurück */
+const TRAIN_DIM = DELAY_COLORS.map((d) => ({ max: d.max, head: px(mixHex(d.color, '#1c2541', 0.62)), tail: px(mixHex(d.tail, '#1c2541', 0.7)) }));
+const TRAIN_UNKNOWN_DIM = { max: Infinity, head: px('#3a4361'), tail: px('#262e48') };
 
 const SPRITES: Record<string, { rows: string[]; colors: Record<string, number> }> = {
   block: { rows: ['..r..', '.rwr.', '.rwr.', 'rrrrr', 'rrwrr'], colors: { r: px('#ff4f6e'), w: px('#ffffff') } },
@@ -482,8 +494,12 @@ export class PixelMap {
     const m = this.model;
     const blink = Math.floor(f.now / 420) % 2 === 0;
 
+    // Fokus auf einen Zug: alles andere tritt zurück, Brennpunkte pausieren
+    const focus = f.selected.train !== undefined;
+    const selState = focus ? f.trains.find((t) => t.trip === f.selected.train) : undefined;
+
     // Brennpunkte: pulsierende Ringe
-    for (const hs of f.hotspots) {
+    for (const hs of focus ? [] : f.hotspots) {
       const x = xy[hs.station * 2], y = xy[hs.station * 2 + 1];
       const phase = ((f.now / 1400 + hs.station * 0.137) % 1 + 1) % 1;
       const r = 2 + phase * (4 + hs.intensity * 8);
@@ -494,11 +510,15 @@ export class PixelMap {
 
     if (f.selected.train !== undefined) {
       const T = m.trips[f.selected.train];
+      // Gefahrener Teil gedämpft, vor dem Zug leuchtend, Halte als Punkte
+      const at = selState?.stop ?? (f.minute < T.schedDep[0] ? 0 : T.stops.length - 1);
       for (let i = 0; i + 1 < T.stops.length; i++) {
         const a = T.stops[i], b = T.stops[i + 1];
-        this.line(buf, xy[a * 2], xy[a * 2 + 1], xy[b * 2], xy[b * 2 + 1], C.route);
-        this.line(glow, xy[a * 2], xy[a * 2 + 1], xy[b * 2], xy[b * 2 + 1], C.routeGlow);
+        const ahead = i >= at;
+        this.line(buf, xy[a * 2], xy[a * 2 + 1], xy[b * 2], xy[b * 2 + 1], ahead ? C.route : C.routePast);
+        if (ahead) this.line(glow, xy[a * 2], xy[a * 2 + 1], xy[b * 2], xy[b * 2 + 1], C.routeGlow);
       }
+      T.stops.forEach((st, i) => this.rect(buf, Math.round(xy[st * 2]) - 1, Math.round(xy[st * 2 + 1]) - 1, 3, 3, i > at ? C.route : C.routePast));
     }
 
     for (const inc of f.incidents) {
@@ -526,7 +546,8 @@ export class PixelMap {
       const x = ax + (bx - ax) * s.progress, y = ay + (by - ay) * s.progress;
       const len = Math.hypot(bx - ax, by - ay) || 1;
       const dx = (bx - ax) / len, dy = (by - ay) / len;
-      const col = s.known ? TRAIN_PX.find((c) => s.delay < c.max)! : TRAIN_UNKNOWN;
+      const dim = focus && s.trip !== f.selected.train;
+      const col = s.known ? (dim ? TRAIN_DIM : TRAIN_PX).find((c) => s.delay < c.max)! : dim ? TRAIN_UNKNOWN_DIM : TRAIN_UNKNOWN;
       if (!s.atStation) {
         if (!regional) this.set(buf, x - dx * 3, y - dy * 3, col.tail);
         this.set(buf, x - dx * 2, y - dy * 2, col.tail);
@@ -534,27 +555,42 @@ export class PixelMap {
       // Regionalzüge kleiner, erst nah herangezoomt in voller Größe
       if (big && (!regional || this.zoom >= 3.5)) this.rect(buf, Math.round(x - 0.5), Math.round(y - 0.5), 2, 2, col.head);
       else this.set(buf, x, y, col.head);
-      if (regional && s.delay < 16) {
-        // nur deutliche Verspätungen leuchten
+      if ((regional && s.delay < 16) || dim) {
+        // nur deutliche Verspätungen leuchten, im Fokus nur der gewählte Zug
       } else if (s.known) {
         this.set(glow, x, y, col.head);
         if (s.delay >= 31) this.rect(glow, Math.round(x) - 1, Math.round(y) - 1, 3, 3, col.head);
       }
       this.lastTrains.push({ x, y, trip: s.trip });
-      if (s.trip === f.selected.train) {
-        const c = blink ? C.select : col.head;
-        const rx = Math.round(x), ry = Math.round(y);
-        for (let i = -3; i <= 3; i++) {
-          if (Math.abs(i) < 2) continue;
-          this.set(buf, rx + i, ry - 4, c); this.set(buf, rx + i, ry + 4, c);
-          this.set(buf, rx - 4, ry + i, c); this.set(buf, rx + 4, ry + i, c);
-        }
-        this.ring(glow, rx, ry, 5, C.select);
-      }
+    }
+    // Gewählter Zug: Namensschild mit Linie und Verspätung, ruhiger Puls statt Blinken
+    if (selState) {
+      const T = m.trips[selState.trip];
+      const a = T.stops[selState.stop], b = T.stops[Math.min(selState.stop + 1, T.stops.length - 1)];
+      const x = Math.round(xy[a * 2] + (xy[b * 2] - xy[a * 2]) * selState.progress);
+      const y = Math.round(xy[a * 2 + 1] + (xy[b * 2 + 1] - xy[a * 2 + 1]) * selState.progress);
+      const col = selState.known ? TRAIN_PX.find((c) => selState.delay < c.max)! : TRAIN_UNKNOWN;
+      const phase = (f.now / 2000) % 1;
+      this.ring(glow, x, y, 3 + phase * 9, col.head);
+      this.rect(buf, x - 3, y - 3, 7, 7, C.labelShadow);
+      this.rect(buf, x - 2, y - 2, 5, 5, C.select);
+      this.rect(buf, x - 1, y - 1, 3, 3, col.head);
+      this.rect(glow, x - 2, y - 2, 5, 5, col.head);
+      const delay = selState.known && Math.round(selState.delay) >= 1 ? ` +${Math.round(selState.delay)}` : '';
+      const text = `${T.line}${delay}`;
+      const tw = textWidth(text);
+      const bw = tw + 5, bh = 9;
+      const above = y - 7 - bh > 2;
+      const bx = Math.max(1, Math.min(this.w - bw - 1, x - (bw >> 1)));
+      const by = above ? y - 6 - bh : y + 6;
+      this.rect(buf, bx - 1, by - 1, bw + 2, bh + 2, C.labelShadow);
+      this.rect(buf, bx, by, bw, bh, col.head);
+      this.rect(buf, x, above ? by + bh + 1 : y + 3, 1, 2, col.head);
+      drawText(buf, this.w, this.h, bx + 3, by + 2, text, C.tagText);
     }
     if (f.selected.station !== undefined) {
       const x = xy[f.selected.station * 2], y = xy[f.selected.station * 2 + 1];
-      this.ring(buf, x, y, 5, blink ? C.select : C.route);
+      this.ring(buf, x, y, 5, C.select);
       this.ring(glow, x, y, 5, C.route);
     }
     if (f.user) {
@@ -595,13 +631,13 @@ export class PixelMap {
   }
 
   /** Bringt einen Punkt in den sichtbaren Bereich; `bottomCss` = aktuell vom Sheet verdeckte Höhe. */
-  ensureVisible(lon: number, lat: number, bottomCss: number, minZoom = 1) {
+  ensureVisible(lon: number, lat: number, bottomCss: number, minZoom = 1, center = false) {
     if (this.zoom < minZoom) this.zoom = minZoom;
     const s = this.w / (this.canvas.getBoundingClientRect().width || 1);
     const top = this.insets.top * s, bottom = bottomCss * s;
     const [x, y] = this.project(lon, lat);
     const margin = 16;
-    if (x > margin && x < this.w - margin && y > top + margin && y < this.h - bottom - margin) {
+    if (!center && x > margin && x < this.w - margin && y > top + margin && y < this.h - bottom - margin) {
       this.dirty = true;
       return;
     }

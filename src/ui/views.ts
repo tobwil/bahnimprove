@@ -119,6 +119,7 @@ export function trainDetail(m: DayModel, r: SimResult, trip: number, s: TrainSta
       <div class="detail-title">${lineBadge(m, trip)}<span class="detail-route">${esc(endpoints(m, trip))}</span></div>
       <div class="big-delay" style="--c:${c}">${R.canceled ? 'Ausfall' : unknown ? '–' : `${fmtDelay(delayNow)}<small>Min</small>`}</div>
       <div class="detail-meta">${esc(status)} · ${esc(T.operator)}</div>
+      ${s ? `<button class="ghost-btn detail-locate" data-locate-train="${trip}">◎ Auf der Karte zeigen</button>` : ''}
     </div>
     ${unknown || R.canceled ? '' : `<div class="profile">${profileSvg(m, r, trip, now)}</div>`}
     ${
