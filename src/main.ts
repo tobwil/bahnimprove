@@ -269,7 +269,7 @@ async function main() {
       const hit = map.hitTest(mx, my);
       if (hit?.type === 'train') selectTrain(hit.id, false);
       else if (hit?.type === 'station') selectStation(hit.id, true);
-      else closeDetail();
+      else backToMap();
     },
     hover: (x, y) => hover(x, y),
   });
@@ -382,8 +382,11 @@ async function main() {
     }
     closeDetail();
     if (tab === 'now') {
-      // "Karte": Sheet einklappen, nochmal tippen zeigt die Listen
-      if (fromNav) sheet.set(again && sheet.snap === 'peek' ? 'half' : 'peek');
+      // "Karte": Sheet einklappen; nochmal tippen zeigt wieder ganz Deutschland
+      if (fromNav) {
+        if (again && sheet.snap === 'peek') map.reset();
+        sheet.set('peek');
+      }
       else if (sheet.snap === 'peek') sheet.set('half');
     } else if (tab === 'analysis') sheet.set(fromNav ? 'full' : sheet.snap === 'peek' ? 'half' : sheet.snap);
     else sheet.set('full');
@@ -425,6 +428,23 @@ async function main() {
     if (fromMap) sheet.set('half');
     const st = state.day.model.stations[station];
     requestAnimationFrame(() => map.ensureVisible(st.lon, st.lat, sheet.visibleHeight()));
+  }
+
+  /**
+   * Tipp auf eine leere Stelle der Karte: zurück in den Grundzustand (Auswahl weg, Panel
+   * eingeklappt, "Karte" aktiv). Der Kartenausschnitt bleibt; ganz Deutschland zeigt ein
+   * zweiter Tipp auf "Karte" oder der ◎-Knopf. Wer einem geteilten Zug folgt, bleibt dabei.
+   */
+  function backToMap() {
+    if (state.follow) {
+      if (!sheet.docked) sheet.set('peek');
+      return;
+    }
+    if (state.tab !== 'now') selectTab('now', true);
+    else {
+      closeDetail();
+      sheet.set('peek');
+    }
   }
 
   function closeDetail() {
@@ -800,9 +820,10 @@ async function main() {
     const m = state.day.model;
     const chips: { i: number; meta: string }[] = [];
     const add = (i: number | undefined, meta = '') => i !== undefined && !chips.some((c) => c.i === i) && chips.push({ i, meta });
-    if (state.user) for (const x of nearestStations(state.user, 2)) add(x.i, x.d < 1 ? `${Math.round(x.d * 1000)} m` : `${x.d.toFixed(1).replace('.', ',')} km`);
-    for (const name of loadRecent()) add(stationByName(name));
-    if (chips.length < 3) for (const name of BIG_STATIONS) chips.length < 5 && add(stationByName(name));
+    if (state.user) for (const x of nearestStations(state.user, 3)) add(x.i, x.d < 1 ? `${Math.round(x.d * 1000)} m` : `${x.d.toFixed(1).replace('.', ',')} km`);
+    for (const name of loadRecent()) add(stationByName(name), 'zuletzt');
+    // Große Bahnhöfe nur als Einstieg, solange es weder Standort noch Verlauf gibt – sonst wirken sie wie „in der Nähe“
+    if (!chips.length) for (const name of BIG_STATIONS) add(stationByName(name));
     const locate = state.user ? '' : `<button class="chip" data-locate>◎ In meiner Nähe</button>`;
     setHtml(
       'board-chips',
@@ -1289,8 +1310,12 @@ async function main() {
   } else if (location.hash === '#abfahrten') selectTab('board');
   else if (/\/datenschutz\/?$/.test(location.pathname) || location.hash === '#datenschutz') openPrivacy();
   else if (/\/impressum\/?$/.test(location.pathname) || location.hash === '#impressum') openImprint();
-  const followLink = location.pathname.match(/^\/zug\/(\d{8})\/([^/]+)\/?$/);
-  if (followLink) void startFollow(followLink[1], decodeURIComponent(followLink[2]), new URLSearchParams(location.search));
+  // Zug-Link direkt oder über den Notfall-Weg /?folge=/zug/… der Vorschau-Funktion
+  const folge = new URLSearchParams(location.search).get('folge');
+  const followTarget = folge?.startsWith('/zug/') ? new URL(folge, location.origin) : location;
+  const followLink = followTarget.pathname.match(/^\/zug\/(\d{8})\/([^/]+)\/?$/);
+  // Angehängter Text aus Messengern ("/zug/…/913549 Ich sitze …") gehört nicht zur Zug-ID
+  if (followLink) void startFollow(followLink[1], decodeURIComponent(followLink[2]).split(/\s/)[0], new URLSearchParams(followTarget.search));
   watchHostBadge(layoutMap);
   layoutMap();
   syncControls();

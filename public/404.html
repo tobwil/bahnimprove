@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="robots" content="noindex" />
+    <title>Share my Train</title>
+    <script>
+      // Messenger und Teilen-Menüs hängen manchmal Text an Links ("/bericht Lessons learned …").
+      // Statt einer Fehlerseite zur gemeinten Seite weiterleiten.
+      (function () {
+        var p = '';
+        try {
+          p = decodeURIComponent(location.pathname);
+        } catch (e) {
+          p = location.pathname;
+        }
+        var zug = p.match(/^\/zug\/(\d{8})\/([^\/\s]+)/);
+        if (zug) return location.replace('/zug/' + zug[1] + '/' + encodeURIComponent(zug[2]) + location.search);
+        var pages = ['/bericht', '/datenschutz', '/impressum'];
+        for (var i = 0; i < pages.length; i++) if (p.indexOf(pages[i]) === 0) return location.replace(pages[i]);
+        location.replace('/');
+      })();
+    </script>
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: #070a14;
+        color: #e9eefc;
+        font: 16px/1.5 system-ui, -apple-system, 'Segoe UI', sans-serif;
+      }
+      main {
+        display: grid;
+        place-content: center;
+        height: 100%;
+        padding: 0 16px;
+        text-align: center;
+      }
+      a {
+        color: #ffc56b;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <p>Diese Seite gibt es nicht.</p>
+      <p><a href="/">Zur Karte von Share my Train</a></p>
+    </main>
+  </body>
+</html>

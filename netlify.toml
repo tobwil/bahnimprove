@@ -5,6 +5,10 @@
 [build.environment]
   NODE_VERSION = "22"
 
+# Die Vorschau-Seite für geteilte Züge braucht die App-Seite ohne Umweg übers Netz
+[functions.share-page]
+  included_files = ["dist/index.html"]
+
 # Teilbarer Wochenbericht
 [[redirects]]
   from = "/bericht"
