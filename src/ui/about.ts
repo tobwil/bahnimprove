@@ -31,7 +31,7 @@ export function aboutPage(): string {
 
     <section class="card">
       <h3>Datenschutz</h3>
-      <p class="fine"><b>Kein Tracking, keine Cookies, keine Anmeldung.</b> Dein Standort bleibt auf deinem Gerät. Alles Weitere in der <a href="/datenschutz" data-legal="privacy">Datenschutzerklärung</a>.</p>
+      <p class="fine"><b>Keine Cookies, keine Werbung, keine Anmeldung.</b> Nur eine anonyme Nutzungsstatistik (Umami, ohne Cookies), der du widersprechen kannst. Dein Standort bleibt auf deinem Gerät. Alles Weitere in der <a href="/datenschutz" data-legal="privacy">Datenschutzerklärung</a>.</p>
       <p class="fine">Anbieter: Wilhelm &amp; Zeitlmann GbR – KIsruptiv, Coburg. Siehe <a href="/impressum" data-legal="imprint">Impressum</a>.</p>
     </section>
 
@@ -52,12 +52,21 @@ export function privacyPage(): string {
 
     <section class="card">
       <h3>Kurz gesagt</h3>
-      <p class="fine"><b>Kein Tracking, keine Cookies, keine Werbung, keine Anmeldung.</b> Es werden keine Profile gebildet und keine Daten an Dritte verkauft oder weitergegeben. Schriften und Daten kommen vom eigenen Server, es gibt keine Anfragen an Google oder andere Dienste.</p>
+      <p class="fine"><b>Keine Cookies, keine Werbung, keine Anmeldung.</b> Für eine anonyme Nutzungsstatistik setzen wir Umami ein: ohne Cookies, ohne Speicherung auf deinem Gerät und ohne Profile (Details unten). Es werden keine Daten verkauft. Schriften und Fahrplandaten kommen vom eigenen Server, es gibt keine Anfragen an Google.</p>
     </section>
 
     <section class="card">
       <h3>Hosting und Server-Protokolle</h3>
       <p class="fine">Die Seite wird bei Netlify, Inc. (San Francisco, USA) gehostet. Bei jedem Aufruf verarbeitet Netlify technisch notwendige Daten: IP-Adresse, Zeitpunkt, aufgerufene Adresse, Browser-Kennung und übertragene Datenmenge. Das ist nötig, um die Seite sicher auszuliefern (Art. 6 Abs. 1 lit. f DSGVO, berechtigtes Interesse an einem stabilen, sicheren Betrieb). Die Protokolle werden von Netlify nur kurzzeitig aufbewahrt. Für die Übermittlung in die USA stellt Netlify einen Auftragsverarbeitungsvertrag mit den Standardvertragsklauseln der EU-Kommission bereit.</p>
+    </section>
+
+    <section class="card">
+      <h3>Nutzungsstatistik (Umami)</h3>
+      <p class="fine">Um zu verstehen, welche Funktionen genutzt werden und wo die App hakt, verwenden wir Umami Cloud der Umami Software, Inc. (San Francisco, USA). Umami setzt <b>keine Cookies</b> und speichert nichts auf deinem Gerät; deshalb ist keine Einwilligung nach § 25 TDDDG nötig und es gibt keinen Cookie-Banner.</p>
+      <p class="fine">Bei einem Aufruf erhält Umami: die aufgerufene Seite (ohne die Angaben hinter „?“, also ohne Namen aus geteilten Links), die verweisende Seite, Browser, Betriebssystem, Gerätetyp, Bildschirmgröße, Sprache und das ungefähre Land bzw. die Region. Die IP-Adresse wird nur dafür kurz verarbeitet und nicht gespeichert. Besuche werden über eine anonyme Kennung gezählt, die aus diesen technischen Merkmalen berechnet wird und regelmäßig wechselt; ein Profil, das dich als Person erkennt, entsteht nicht.</p>
+      <p class="fine">Zusätzlich zählen wir Bedien-Ereignisse ohne persönlichen Inhalt, etwa „Abfahrten geöffnet (Quelle: in der Nähe)“, „Zug geteilt (Weg: Link kopiert)“, „Suche (Art: Linie, Treffer: ja)“. Suchtexte, Namen, Standorte und Zugnummern werden dabei nicht übertragen.</p>
+      <p class="fine">Rechtsgrundlage ist unser berechtigtes Interesse, das kostenlose Angebot zu verbessern (Art. 6 Abs. 1 lit. f DSGVO). Umami ist unser Auftragsverarbeiter; für die Übermittlung in die USA gelten die Standardvertragsklauseln der EU-Kommission im Auftragsverarbeitungsvertrag von Umami. Wir sehen nur zusammengefasste Zahlen.</p>
+      <p class="fine"><b>Widerspruch:</b> <span data-tracking-state></span> <button class="ghost-btn" type="button" data-tracking-toggle></button> Die Einstellung wird nur in deinem Browser gespeichert (localStorage) und gilt für dieses Gerät. Auch die „Do Not Track“-Einstellung des Browsers wird beachtet.</p>
     </section>
 
     <section class="card">
@@ -72,7 +81,7 @@ export function privacyPage(): string {
 
     <section class="card">
       <h3>Speicher auf deinem Gerät</h3>
-      <p class="fine">Damit du Einstellungen nicht jedes Mal neu wählen musst, merkt sich der Browser lokal (localStorage): Kartenfilter, zuletzt gewählte Bahnhöfe und den Namen fürs Teilen. Diese Angaben verlassen dein Gerät nicht und sind für die von dir genutzten Funktionen nötig (§ 25 Abs. 2 TDDDG). Du kannst sie jederzeit über die Browser-Einstellungen löschen.</p>
+      <p class="fine">Damit du Einstellungen nicht jedes Mal neu wählen musst, merkt sich der Browser lokal (localStorage): Kartenfilter, zuletzt gewählte Bahnhöfe, den Namen fürs Teilen und gegebenenfalls deinen Widerspruch gegen die Statistik. Diese Angaben verlassen dein Gerät nicht und sind für die von dir genutzten Funktionen nötig (§ 25 Abs. 2 TDDDG). Du kannst sie jederzeit über die Browser-Einstellungen löschen.</p>
     </section>
 
     <section class="card">
