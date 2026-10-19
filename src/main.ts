@@ -904,7 +904,7 @@ async function main() {
       return;
     }
     const typical = (station: string, line: string) => insights?.typical?.[`${station}|${line}`];
-    setHtml('board', departureBoard(m, r, state.boardStation, state.time, { mode: state.boardMode, live: state.day.mode === 'real', typical, loading: boardLoading }), force);
+    setHtml('board', departureBoard(m, r, state.boardStation, state.time, { mode: state.boardMode, live: state.day.mode === 'real', typical, loading: boardLoading, recent: state.hotspots.find((h) => h.station === state.boardStation) }), force);
   }
   const boardInput = $<HTMLInputElement>('board-input');
   const boardSuggest = $('board-suggest');

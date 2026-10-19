@@ -998,6 +998,16 @@ button {
   color: #b9a37f;
 }
 
+.board-recent {
+  margin: 0 0 8px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.board-recent b {
+  color: var(--late);
+}
+
 .board-empty {
   margin: 8px 0 12px;
   font-family: var(--f-display);
