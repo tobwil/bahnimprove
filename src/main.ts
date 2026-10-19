@@ -269,7 +269,7 @@ async function main() {
       const hit = map.hitTest(mx, my);
       if (hit?.type === 'train') selectTrain(hit.id, false);
       else if (hit?.type === 'station') selectStation(hit.id, true);
-      else closeDetail();
+      else backToMap();
     },
     hover: (x, y) => hover(x, y),
   });
@@ -382,8 +382,11 @@ async function main() {
     }
     closeDetail();
     if (tab === 'now') {
-      // "Karte": Sheet einklappen, nochmal tippen zeigt die Listen
-      if (fromNav) sheet.set(again && sheet.snap === 'peek' ? 'half' : 'peek');
+      // "Karte": Sheet einklappen; nochmal tippen zeigt wieder ganz Deutschland
+      if (fromNav) {
+        if (again && sheet.snap === 'peek') map.reset();
+        sheet.set('peek');
+      }
       else if (sheet.snap === 'peek') sheet.set('half');
     } else if (tab === 'analysis') sheet.set(fromNav ? 'full' : sheet.snap === 'peek' ? 'half' : sheet.snap);
     else sheet.set('full');
@@ -425,6 +428,23 @@ async function main() {
     if (fromMap) sheet.set('half');
     const st = state.day.model.stations[station];
     requestAnimationFrame(() => map.ensureVisible(st.lon, st.lat, sheet.visibleHeight()));
+  }
+
+  /**
+   * Tipp auf eine leere Stelle der Karte: zurück in den Grundzustand (Auswahl weg, Panel
+   * eingeklappt, "Karte" aktiv). Der Kartenausschnitt bleibt; ganz Deutschland zeigt ein
+   * zweiter Tipp auf "Karte" oder der ◎-Knopf. Wer einem geteilten Zug folgt, bleibt dabei.
+   */
+  function backToMap() {
+    if (state.follow) {
+      if (!sheet.docked) sheet.set('peek');
+      return;
+    }
+    if (state.tab !== 'now') selectTab('now', true);
+    else {
+      closeDetail();
+      sheet.set('peek');
+    }
   }
 
   function closeDetail() {
