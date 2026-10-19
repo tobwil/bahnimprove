@@ -1309,9 +1309,12 @@ async function main() {
   } else if (location.hash === '#abfahrten') selectTab('board');
   else if (/\/datenschutz\/?$/.test(location.pathname) || location.hash === '#datenschutz') openPrivacy();
   else if (/\/impressum\/?$/.test(location.pathname) || location.hash === '#impressum') openImprint();
-  const followLink = location.pathname.match(/^\/zug\/(\d{8})\/([^/]+)\/?$/);
+  // Zug-Link direkt oder über den Notfall-Weg /?folge=/zug/… der Vorschau-Funktion
+  const folge = new URLSearchParams(location.search).get('folge');
+  const followTarget = folge?.startsWith('/zug/') ? new URL(folge, location.origin) : location;
+  const followLink = followTarget.pathname.match(/^\/zug\/(\d{8})\/([^/]+)\/?$/);
   // Angehängter Text aus Messengern ("/zug/…/913549 Ich sitze …") gehört nicht zur Zug-ID
-  if (followLink) void startFollow(followLink[1], decodeURIComponent(followLink[2]).split(/\s/)[0], new URLSearchParams(location.search));
+  if (followLink) void startFollow(followLink[1], decodeURIComponent(followLink[2]).split(/\s/)[0], new URLSearchParams(followTarget.search));
   watchHostBadge(layoutMap);
   layoutMap();
   syncControls();
