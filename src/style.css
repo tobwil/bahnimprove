@@ -2172,7 +2172,7 @@ a.ghost-btn {
 
   /* Eingeklappt nur die Kernaussage; Kennzahlen und Zeitleiste beim Hochziehen */
   :root {
-    --sheet-peek: 96px;
+    --sheet-peek: 116px;
   }
 
   .toast {
