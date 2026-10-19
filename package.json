@@ -3,10 +3,10 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Pixel-Leitstand f\u00fcr den deutschen Fernverkehr \u2013 Live-Karte, Versp\u00e4tungen, Tagesbericht mit Dispositionsvorschl\u00e4gen",
+  "description": "Pixel-Leitstand für den deutschen Fernverkehr – Live-Karte, Verspätungen, Tagesbericht mit Dispositionsvorschlägen",
   "scripts": {
     "dev": "vite",
-    "build": "tsc --noEmit && vite build",
+    "build": "tsc --noEmit && vite build && node -e \"for (const d of ['dist/data/rv','dist/data/realtime']) require('fs').rmSync(d,{recursive:true,force:true})\"",
     "preview": "vite preview",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
@@ -24,7 +24,12 @@
     "vitest": "2.1.4"
   },
   "dependencies": {
+    "@fontsource/geist-mono": "5.3.0",
+    "@fontsource/geist-sans": "5.3.0",
+    "@fontsource/jersey-10": "5.2.5",
+    "@fontsource/silkscreen": "5.3.0",
     "@netlify/blobs": "8.1.0",
+    "fflate": "0.8.2",
     "gtfs-realtime-bindings": "1.1.1"
   }
 }

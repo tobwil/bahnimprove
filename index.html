@@ -2,14 +2,17 @@
 <html lang="de">
   <head>
     <meta charset="UTF-8" />
+    <!-- Geteilte Zugfahrten liegen unter /zug/…: Daten und Assets immer relativ zur Wurzel -->
+    <base href="/" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="theme-color" content="#070a14" />
-    <title>Bahnimprove Leitstand</title>
-    <meta name="description" content="Pixel-Leitstand für den deutschen Fernverkehr: Live-Karte, echte Verspätungen und ein Tagesbericht mit Dispositionsvorschlägen." />
+    <title>Share my Train</title>
+    <meta name="description" content="Share my Train: Alle Züge in Deutschland live auf einer Pixelkarte. Teile deine Zugfahrt mit deinen Liebsten, sieh Abfahrten mit Prognose und offene Lessons learned für die Bahn." />
+    <meta property="og:title" content="Share my Train" />
+    <meta property="og:site_name" content="Share my Train" />
+    <meta property="og:description" content="Teile deine Zugfahrt live, sieh alle Züge auf der Karte und wann sie wirklich ankommen – aus echten Echtzeitdaten." />
+    <meta property="og:type" content="website" />
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 8 8' shape-rendering='crispEdges'%3E%3Crect width='8' height='8' fill='%23070a14'/%3E%3Crect x='1' y='2' width='6' height='3' fill='%23ffc56b'/%3E%3Crect x='2' y='3' width='1' height='1' fill='%23070a14'/%3E%3Crect x='5' y='3' width='1' height='1' fill='%23070a14'/%3E%3Crect x='1' y='6' width='6' height='1' fill='%238ab4ff'/%3E%3C/svg%3E" />
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&family=Pixelify+Sans:wght@500;700&family=Silkscreen&display=swap" rel="stylesheet" />
   </head>
   <body>
     <div class="app" id="app">
@@ -31,10 +34,61 @@
           </div>
         </header>
 
+        <nav class="legal-links" aria-label="Rechtliches">
+          <a href="/impressum" data-legal="imprint">Impressum</a>
+          <a href="/datenschutz" data-legal="privacy">Datenschutz</a>
+          <a href="#" data-legal="about">Über</a>
+        </nav>
+
         <div class="map-tools">
-          <button id="zoom-in" class="tool-btn" aria-label="Hineinzoomen">+</button>
-          <button id="zoom-out" class="tool-btn" aria-label="Herauszoomen">−</button>
+          <button id="locate" class="tool-btn tool-btn--locate" aria-label="Meinen Standort zeigen">
+            <svg viewBox="0 0 16 16" width="18" height="18" aria-hidden="true" shape-rendering="crispEdges"><path fill="currentColor" d="M7 0h2v3H7zM7 13h2v3H7zM0 7h3v2H0zM13 7h3v2h-3zM5 4h6v1H5zM4 5h1v6H4zM11 5h1v6h-1zM5 11h6v1H5zM7 7h2v2H7z"/></svg>
+          </button>
+          <button id="layers-btn" class="tool-btn" aria-label="Filter und Legende" aria-expanded="false" aria-controls="layers">
+            <svg viewBox="0 0 16 16" width="18" height="18" aria-hidden="true" shape-rendering="crispEdges"><path fill="currentColor" d="M7 1h2v1H7zM5 2h2v1H5zM9 2h2v1H9zM3 3h2v1H3zM11 3h2v1h-2zM1 4h2v1H1zM13 4h2v1h-2zM3 5h2v1H3zM11 5h2v1h-2zM5 6h2v1H5zM9 6h2v1H9zM7 7h2v1H7zM1 8h2v1H1zM13 8h2v1h-2zM3 9h2v1H3zM11 9h2v1h-2zM5 10h2v1H5zM9 10h2v1H9zM7 11h2v1H7zM1 12h2v1H1zM13 12h2v1h-2zM3 13h2v1H3zM11 13h2v1h-2zM5 14h2v1H5zM9 14h2v1H9zM7 15h2v1H7z"/></svg>
+          </button>
+          <button id="zoom-in" class="tool-btn tool-btn--zoom" aria-label="Hineinzoomen">+</button>
+          <button id="zoom-out" class="tool-btn tool-btn--zoom" aria-label="Herauszoomen">−</button>
           <button id="zoom-reset" class="tool-btn" aria-label="Ganz Deutschland zeigen">◎</button>
+        </div>
+
+        <div id="layers" class="layers" hidden>
+          <div class="layers-group">
+            <span class="eyebrow">Bahnhofsnamen</span>
+            <div class="seg seg--solid" role="group" aria-label="Bahnhofsnamen">
+              <button class="seg-btn is-active" data-label="few">Wenige</button>
+              <button class="seg-btn" data-label="many">Viele</button>
+              <button class="seg-btn" data-label="off">Aus</button>
+            </div>
+          </div>
+          <div class="layers-group">
+            <span class="eyebrow">Züge auf der Karte</span>
+            <div class="chips" id="train-filter">
+              <button class="chip is-active" data-kind="fv" aria-pressed="true">Fernverkehr</button>
+              <button class="chip is-active" data-kind="rv" aria-pressed="true">Regional</button>
+              <button class="chip is-active" data-kind="s" aria-pressed="true">S-Bahn</button>
+              <button class="chip" data-kind="late" aria-pressed="false">Nur verspätete</button>
+            </div>
+          </div>
+          <div class="layers-group">
+            <span class="eyebrow">Legende</span>
+            <ul class="legend">
+              <li><i style="--c: var(--ok)"></i>pünktlich, unter 6 Min</li>
+              <li><i style="--c: var(--warn)"></i>6 bis 15 Min später</li>
+              <li><i style="--c: var(--late)"></i>16 bis 30 Min später</li>
+              <li><i style="--c: var(--bad)"></i>über 30 Min später</li>
+              <li><i style="--c: var(--nodata)"></i>keine Echtzeitdaten</li>
+              <li><i class="is-ring" style="--c: var(--bad)"></i>Brennpunkt: hier verlieren Züge gerade Zeit</li>
+              <li><i class="is-ring" style="--c: #4aa8ff"></i><span><b>DU</b> = dein Standort (bleibt auf deinem Gerät)</span></li>
+            </ul>
+          </div>
+        </div>
+
+        <div id="replay-bar" class="replay-bar" hidden>
+          <button id="play" class="round-btn round-btn--small" aria-label="Pause">❚❚</button>
+          <span class="replay-text"><span class="eyebrow">Wiedergabe</span><b id="replay-date">–</b></span>
+          <button id="speed" class="speed-btn" aria-label="Geschwindigkeit">60×</button>
+          <button id="replay-live" class="live-btn"><span class="live-dot" aria-hidden="true"></span>Live</button>
         </div>
       </section>
 
@@ -49,7 +103,7 @@
               <span id="kpi-punct" class="gauge-value">–</span>
             </div>
             <div class="status-text">
-              <span class="eyebrow">Pünktlichkeit heute</span>
+              <span class="eyebrow">Pünktlichkeit Fernverkehr heute</span>
               <span id="status-line" class="status-line">Lade Fahrplan und Echtzeit …</span>
               <span id="source-chip" class="source-chip">…</span>
             </div>
@@ -62,22 +116,28 @@
         </div>
 
         <div class="timeline">
-          <button id="play" class="round-btn" aria-label="Pause">❚❚</button>
           <div class="strip-wrap">
             <canvas id="strip" aria-label="Tagesverlauf: Pünktlichkeit je Stunde. Ziehen zum Spulen."></canvas>
             <div class="strip-hours" aria-hidden="true"><span>04</span><span>08</span><span>12</span><span>16</span><span>20</span><span>00</span></div>
           </div>
-          <button id="speed" class="speed-btn" aria-label="Geschwindigkeit">60×</button>
+          <button id="timeline-btn" class="speed-btn timeline-btn">Rückblick</button>
         </div>
 
         <div class="sheet-body" id="sheet-body">
           <nav class="tabs" role="tablist" aria-label="Ansicht">
             <button class="tab is-active" role="tab" data-tab="now" aria-selected="true">Jetzt</button>
-            <button class="tab" role="tab" data-tab="trains" aria-selected="false">Züge</button>
-            <button class="tab" role="tab" data-tab="report" aria-selected="false">Bericht</button>
+            <button class="tab" role="tab" data-tab="board" aria-selected="false">Abfahrten</button>
+            <button class="tab" role="tab" data-tab="trip" aria-selected="false">Reise</button>
+            <button class="tab" role="tab" data-tab="search" aria-selected="false">Suche</button>
+            <button class="tab" role="tab" data-tab="analysis" aria-selected="false">Analyse</button>
           </nav>
 
           <div class="view" id="view-now" role="tabpanel">
+            <h2 class="view-title">Live im Netz</h2>
+            <section class="block" id="nearby-block" hidden>
+              <h2 class="block-title">In deiner Nähe</h2>
+              <ul id="nearby" class="rows"></ul>
+            </section>
             <section class="block">
               <h2 id="incidents-title" class="block-title">Brennpunkte · letzte 60 Min</h2>
               <ul id="incidents" class="rows"></ul>
@@ -88,36 +148,123 @@
             </section>
           </div>
 
-          <div class="view" id="view-trains" role="tabpanel" hidden>
-            <label class="search">
-              <span class="visually-hidden">Zug oder Bahnhof suchen</span>
-              <input id="search" type="search" placeholder="ICE 28, Köln, München …" autocomplete="off" />
-            </label>
-            <ul id="train-list" class="rows"></ul>
+          <div class="view" id="view-board" role="tabpanel" hidden>
+            <div class="board-pick">
+              <label class="search search--board">
+                <span class="visually-hidden">Bahnhof für die Abfahrtstafel</span>
+                <input id="board-input" type="search" placeholder="Bahnhof wählen …" autocomplete="off" enterkeyhint="search" />
+              </label>
+              <ul id="board-suggest" class="suggest" hidden></ul>
+            </div>
+            <div class="board-bar">
+              <div class="seg seg--solid" role="group" aria-label="Richtung">
+                <button id="board-dep" class="seg-btn is-active">Abfahrten</button>
+                <button id="board-arr" class="seg-btn">Ankünfte</button>
+              </div>
+            </div>
+            <div id="board-chips" class="chips"></div>
+            <div id="board"></div>
+            <p class="fine board-legend"><b>Prognose</b> = aktuelle Echtzeitmeldung des Zuges. <b>meist</b> = typische Verspätung dieser Linie an diesem Bahnhof aus den beobachteten Tagen, solange der Zug noch keine Echtzeitdaten sendet (bisher nur Fernverkehr). Gleisangaben enthalten die offenen Daten nicht.</p>
           </div>
 
-          <div class="view" id="view-report" role="tabpanel" hidden>
-            <div class="report-teaser" id="report-teaser"></div>
-            <button id="open-report" class="cta">Tagesbericht öffnen</button>
-            <p class="fine">Der Leitstand spielt den Tag mit anderen Entscheidungen nach: Anschlüsse halten, Züge vorlassen, nicht warten.</p>
+          <div class="view" id="view-search" role="tabpanel" hidden>
+            <h2 class="view-title">Zug oder Bahnhof suchen</h2>
+            <label class="search">
+              <span class="visually-hidden">Zug oder Bahnhof suchen</span>
+              <input id="search" type="search" placeholder="ICE 28, Köln, „Köln München“ …" autocomplete="off" enterkeyhint="search" />
+            </label>
+            <ul id="search-results" class="rows"></ul>
+          </div>
+
+          <div class="view" id="view-trip" role="tabpanel" hidden>
+            <h2 class="view-title">Schaffe ich meinen Anschluss?</h2>
+            <form id="trip-form" class="trip-form" autocomplete="off">
+              <div class="trip-fields">
+                <label class="field">
+                  <span class="eyebrow">Von</span>
+                  <input id="trip-from" type="text" placeholder="Startbahnhof" enterkeyhint="next" />
+                </label>
+                <button type="button" id="trip-swap" class="swap-btn" aria-label="Start und Ziel tauschen">⇅</button>
+                <label class="field">
+                  <span class="eyebrow">Nach</span>
+                  <input id="trip-to" type="text" placeholder="Zielbahnhof" enterkeyhint="search" />
+                </label>
+              </div>
+              <ul id="trip-suggest" class="suggest" hidden></ul>
+              <div class="trip-when">
+                <label class="field field--time">
+                  <span class="eyebrow">Ab</span>
+                  <input id="trip-time" type="time" />
+                </label>
+                <button type="submit" class="cta cta--small">Verbindungen prüfen</button>
+              </div>
+            </form>
+            <div id="trip-results"></div>
+          </div>
+
+          <div class="view" id="view-analysis" role="tabpanel" hidden>
+            <h2 class="view-title">Analyse und Lessons learned</h2>
+            <section class="block">
+              <h2 class="block-title">Lessons learned für die DB</h2>
+              <div id="insights-teaser"></div>
+              <button id="open-insights" class="cta">Alle Erkenntnisse ansehen</button>
+            </section>
+            <section class="block">
+              <h2 class="block-title">Tagesbericht</h2>
+              <div class="report-teaser" id="report-teaser"></div>
+              <button id="open-report" class="ghost-btn ghost-btn--wide">Tagesbericht öffnen</button>
+            </section>
+            <section class="block">
+              <button id="open-about" class="ghost-btn ghost-btn--wide">Über, offene Daten &amp; Datenschutz</button>
+            </section>
           </div>
 
           <div class="view" id="view-detail" hidden>
             <button id="detail-back" class="back-btn">← Zurück</button>
+            <div id="follow-card" hidden></div>
+            <div id="share-box" hidden></div>
             <div id="detail"></div>
           </div>
 
-          <p class="credits">Fahrplan &amp; Echtzeit: DELFI e.V. / gtfs.de (CC BY 4.0) · Karte: Natural Earth</p>
+          <p class="credits">Fahrplan: DELFI e.V. / gtfs.de (CC BY 4.0) · Echtzeit: gtfs.de (CC BY-SA 4.0) · Karte: Natural Earth<br /><a href="/impressum" data-legal="imprint">Impressum</a> · <a href="/datenschutz" data-legal="privacy">Datenschutz</a> · <a href="#" data-legal="about">Über Share my Train</a></p>
         </div>
       </aside>
+
+      <nav class="appnav" id="appnav" aria-label="Hauptnavigation">
+        <button class="appnav-btn is-active" data-tab="now" aria-current="page">
+          <svg viewBox="0 0 16 16" aria-hidden="true" shape-rendering="crispEdges"><path fill="currentColor" d="M5 1h6v1H5zM4 2h1v1H4zM11 2h1v1h-1zM3 3h1v5H3zM12 3h1v5h-1zM4 8h1v2H4zM11 8h1v2h-1zM5 10h1v2H5zM10 10h1v2h-1zM6 12h1v2H6zM9 12h1v2H9zM7 14h2v1H7zM7 5h2v2H7z"/></svg>
+          <span>Karte</span>
+        </button>
+        <button class="appnav-btn" data-tab="board">
+          <svg viewBox="0 0 16 16" aria-hidden="true" shape-rendering="crispEdges"><path fill="currentColor" d="M4 1h8v1H4zM3 2h1v9H3zM12 2h1v9h-1zM4 11h8v1H4zM5 3h6v3H5zM5 8h2v1H5zM9 8h2v1H9zM4 13h2v2H4zM10 13h2v2h-2z"/></svg>
+          <span>Abfahrten</span>
+        </button>
+        <button class="appnav-btn" data-tab="trip">
+          <svg viewBox="0 0 16 16" aria-hidden="true" shape-rendering="crispEdges"><path fill="currentColor" d="M2 1h4v4H2zM3 5h2v3H3zM3 8h9v2H3zM10 10h2v1h-2zM10 11h4v1h-4zM10 14h4v1h-4zM10 12h1v2h-1zM13 12h1v2h-1z"/></svg>
+          <span>Reise</span>
+        </button>
+        <button class="appnav-btn" data-tab="search">
+          <svg viewBox="0 0 16 16" aria-hidden="true" shape-rendering="crispEdges"><path fill="currentColor" d="M4 1h5v1H4zM2 2h2v1H2zM9 2h2v1H9zM1 3h1v6H1zM11 3h1v6h-1zM2 9h2v1H2zM9 9h2v1H9zM4 10h5v1H4zM10 10h2v2h-2zM12 12h2v2h-2z"/></svg>
+          <span>Suche</span>
+        </button>
+        <button class="appnav-btn" data-tab="analysis">
+          <svg viewBox="0 0 16 16" aria-hidden="true" shape-rendering="crispEdges"><path fill="currentColor" d="M1 14h14v1H1zM2 9h3v5H2zM6 5h3v9H6zM10 2h3v12h-3z"/></svg>
+          <span>Analyse</span>
+        </button>
+      </nav>
     </div>
+
+    <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 
     <div id="report" class="report" hidden>
       <div class="report-scroll">
         <header class="report-head">
-          <span class="eyebrow">Tagesabschluss</span>
+          <span class="eyebrow" id="report-eyebrow">Tagesabschluss</span>
           <h2 id="report-title">Tagesbericht</h2>
-          <button id="report-close" class="tool-btn" aria-label="Bericht schließen">×</button>
+          <div class="report-actions">
+            <button id="report-share" class="ghost-btn" hidden>Teilen</button>
+            <button id="report-close" class="tool-btn" aria-label="Bericht schließen">×</button>
+          </div>
         </header>
         <div id="report-body" class="report-body"></div>
       </div>

@@ -1,7 +1,11 @@
+import type { Journey, JourneyResult } from '../sim/journey.ts';
 import type { LiveHotspot, TrainState } from '../sim/live.ts';
+import type { TripHit } from '../sim/search.ts';
 import type { DayModel } from '../sim/model.ts';
 import { INCIDENT_LABEL, fmtDelay, hhmm, incidentPlace, shortName } from '../sim/text.ts';
 import type { Incident, SimResult } from '../sim/types.ts';
+import { OBS_ARR, OBS_DEP } from '../sim/real.ts';
+import { co2Line, isPain, type FollowStatus } from '../share/status.ts';
 import { delayColor, esc } from './dom.ts';
 
 export const lineBadge = (m: DayModel, trip: number) => {
@@ -116,6 +120,10 @@ export function trainDetail(m: DayModel, r: SimResult, trip: number, s: TrainSta
       <div class="detail-title">${lineBadge(m, trip)}<span class="detail-route">${esc(endpoints(m, trip))}</span></div>
       <div class="big-delay" style="--c:${c}">${R.canceled ? 'Ausfall' : unknown ? '–' : `${fmtDelay(delayNow)}<small>Min</small>`}</div>
       <div class="detail-meta">${esc(status)} · ${esc(T.operator)}</div>
+      <div class="detail-actions">
+        ${s ? `<button class="ghost-btn" data-locate-train="${trip}">◎ Auf der Karte zeigen</button>` : ''}
+        ${!R.canceled && now < R.arr[n - 1] ? `<button class="ghost-btn ghost-btn--accent" data-share-train="${trip}">${shareBrand(!unknown && isPain(Math.max(delayNow, finalDelay)))}</button>` : ''}
+      </div>
     </div>
     ${unknown || R.canceled ? '' : `<div class="profile">${profileSvg(m, r, trip, now)}</div>`}
     ${
@@ -129,28 +137,279 @@ export function trainDetail(m: DayModel, r: SimResult, trip: number, s: TrainSta
     <ol class="stops">${stops}</ol>`;
 }
 
-export function stationBoard(m: DayModel, r: SimResult, station: number, now: number): string {
-  const deps: { trip: number; sched: number; act: number; to: string; known: boolean }[] = [];
+// --- Abfahrtstafel -------------------------------------------------------------
+
+/** Übliche Abfahrtsverspätung einer Linie an einem Bahnhof: [Abfahrten, Median, 80-%-Wert] */
+export type TypicalDelay = (station: string, line: string) => [number, number, number] | undefined;
+
+export interface BoardOptions {
+  mode: 'dep' | 'arr';
+  /** Echtzeitdaten (sonst Simulation) */
+  live: boolean;
+  typical?: TypicalDelay;
+  /** Regionalzüge für diesen Bahnhof werden noch geladen */
+  loading?: boolean;
+}
+
+const BOARD_WINDOW = 180;
+const BOARD_ROWS = 40;
+
+/** Bis zu drei wichtige Unterwegshalte (nach Zughalten pro Tag), in Fahrtrichtung. */
+function viaStops(m: DayModel, stops: number[]): string {
+  const ranked = stops.map((s, k) => ({ s, k, w: m.stations[s].w ?? m.stations[s].weight })).sort((a, b) => b.w - a.w).slice(0, 3);
+  return ranked
+    .sort((a, b) => a.k - b.k)
+    .map((x) => shortName(m.stations[x.s].name))
+    .join(' · ');
+}
+
+interface BoardStatus {
+  text: string;
+  sub: string;
+  c: string;
+  title?: string;
+  /** erwartete Zusatzminuten (für die Zusammenfassung) */
+  expect: number;
+  live: boolean;
+}
+
+function boardStatus(m: DayModel, r: SimResult, trip: number, i: number, station: number, o: BoardOptions): BoardStatus {
+  const T = m.trips[trip];
+  const R = r.trips[trip];
+  const dep = o.mode === 'dep';
+  if (R.canceled) return { text: 'fällt aus', sub: '', c: 'var(--bad)', expect: 0, live: true };
+  if (R.known !== false) {
+    const d = dep ? R.dep[i] - T.schedDep[i] : R.arr[i] - T.schedArr[i];
+    const seen = (R.observed?.[i] ?? 0) & (dep ? OBS_DEP : OBS_ARR);
+    return {
+      text: d >= 1 ? `+${Math.round(d)}` : 'pünktlich',
+      sub: !o.live ? 'Simulation' : seen ? (dep ? 'abgefahren' : 'angekommen') : 'Prognose',
+      c: delayColor(d),
+      expect: Math.max(0, d),
+      live: true,
+    };
+  }
+  // Keine Echtzeit (Zug noch nicht unterwegs): was diese Linie hier üblicherweise hat
+  const t = dep ? o.typical?.(m.stations[station].name, T.line) : undefined;
+  const title = t ? `${t[0]} Abfahrten beobachtet: meist +${t[1]} Min, jede fünfte +${t[2]} Min oder mehr` : undefined;
+  if (t && t[1] >= 2) return { text: `+${t[1]}`, sub: 'meist', c: 'color-mix(in srgb, var(--warn) 70%, var(--muted))', title, expect: t[1], live: false };
+  return { text: 'planmäßig', sub: t ? 'meist pünktlich' : '', c: 'var(--muted)', title, expect: 0, live: false };
+}
+
+/** Abfahrts- bzw. Ankunftstafel mit erwarteter Verspätung: live, sonst aus der Historie. */
+export function departureBoard(m: DayModel, r: SimResult, station: number, now: number, o: BoardOptions): string {
+  const dep = o.mode === 'dep';
+  const rows: { trip: number; i: number; sched: number; act: number }[] = [];
+  const seen = new Set<string>();
   for (const T of m.trips) {
     const i = T.stops.indexOf(station);
-    if (i < 0 || i === T.stops.length - 1) continue;
+    if (i < 0 || (dep ? i === T.stops.length - 1 : i === 0)) continue;
     const R = r.trips[T.id];
-    if (R.canceled) continue;
-    const act = R.dep[i];
-    if (act < now - 1 || T.schedDep[i] > now + 120) continue;
-    deps.push({ trip: T.id, sched: T.schedDep[i], act, to: shortName(m.stations[T.stops[T.stops.length - 1]].name), known: R.known !== false });
+    const sched = dep ? T.schedDep[i] : T.schedArr[i];
+    const act = R.canceled ? sched : dep ? R.dep[i] : R.arr[i];
+    if (act < now - 0.5 || sched > now + BOARD_WINDOW) continue;
+    // Manche Züge stehen in Fern- und Regionalfeed
+    const key = `${T.line}|${sched}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    rows.push({ trip: T.id, i, sched, act });
   }
-  deps.sort((a, b) => a.sched - b.sched);
-  const rows = deps
-    .slice(0, 16)
-    .map((d) => {
-      const late = d.act - d.sched;
-      const cls = !d.known ? '' : late >= 6 ? 'late' : 'ok';
-      return `<tr data-trip="${d.trip}"><td>${hhmm(d.sched)}</td><td>${esc(m.trips[d.trip].line)}</td><td class="dest">${esc(d.to)}</td><td class="${cls}">${d.known ? (late >= 1 ? `+${Math.round(late)}` : 'pünktl.') : ''}</td></tr>`;
+  rows.sort((a, b) => a.sched - b.sched || a.trip - b.trip);
+  const shown = rows.slice(0, BOARD_ROWS);
+  const status = shown.map((x) => boardStatus(m, r, x.trip, x.i, station, o));
+
+  const html = shown
+    .map((x, k) => {
+      const T = m.trips[x.trip];
+      const s = status[k];
+      const end = dep ? T.stops[T.stops.length - 1] : T.stops[0];
+      const via = dep ? T.stops.slice(x.i + 1, -1) : T.stops.slice(1, x.i);
+      const late = s.live && s.expect >= 1 && !r.trips[x.trip].canceled;
+      return `<li class="dep${r.trips[x.trip].canceled ? ' is-canceled' : ''}" data-trip="${x.trip}">
+        <span class="dep-time"><b>${hhmm(x.sched)}</b>${late ? `<span style="color:${s.c}">${hhmm(x.act)}</span>` : ''}</span>
+        <span class="dep-main">
+          <span class="dep-head">${lineBadge(m, x.trip)}<span class="dep-dest">${dep ? '' : '<small>von </small>'}${esc(shortName(m.stations[end].name))}</span></span>
+          ${via.length ? `<span class="dep-via">${dep ? 'über ' : ''}${esc(viaStops(m, via))}</span>` : ''}
+        </span>
+        <span class="dep-status" style="--c:${s.c}"${s.title ? ` title="${esc(s.title)}"` : ''}><b>${s.text}</b>${s.sub ? `<small>${s.sub}</small>` : ''}</span>
+      </li>`;
     })
     .join('');
+
+  const hour = shown.filter((x) => x.sched <= now + 60);
+  const hourLate = hour.filter((x) => status[shown.indexOf(x)].expect >= 5).length;
+  const hourLive = hour.filter((x) => status[shown.indexOf(x)].live).length;
+  const canceled = shown.filter((x) => r.trips[x.trip].canceled).length;
+  const summary = hour.length
+    ? `${hour.length} ${dep ? (hour.length === 1 ? 'Abfahrt' : 'Abfahrten') : hour.length === 1 ? 'Ankunft' : 'Ankünfte'} in der nächsten Stunde · ${
+        hourLate ? `<b style="color:var(--late)">${hourLate} voraussichtlich 5+ Min später</b>` : '<b style="color:var(--ok)">alles im Plan</b>'
+      }${canceled ? ` · <b style="color:var(--bad)">${canceled} ${canceled === 1 ? 'Ausfall' : 'Ausfälle'}</b>` : ''} · Live-Daten für ${hourLive}`
+    : '';
+
   return `<div class="board">
-    <p class="board-title">${esc(shortName(m.stations[station].name))}</p>
-    ${rows ? `<table><tbody>${rows}</tbody></table>` : '<p class="fine">Keine Fernverkehrsabfahrten in den nächsten zwei Stunden.</p>'}
-  </div>`;
+    <div class="board-top"><p class="board-title">${esc(shortName(m.stations[station].name))}</p><span class="board-clock">${hhmm(now)}</span></div>
+    ${summary ? `<p class="board-summary">${summary}</p>` : ''}
+    ${
+      html
+        ? `<ul class="deps">${html}</ul>`
+        : `<p class="board-empty">${o.loading ? 'Lade Züge für diesen Bahnhof …' : `Keine ${dep ? 'Abfahrten' : 'Ankünfte'} in den nächsten drei Stunden.`}</p>`
+    }
+  </div>
+  ${o.loading && html ? '<p class="fine">Regionalzüge werden noch geladen …</p>' : ''}`;
+}
+
+// --- Suche -------------------------------------------------------------------
+
+export function stationRow(m: DayModel, station: number, distanceKm?: number): string {
+  const st = m.stations[station];
+  return `<li class="row" data-station="${station}">
+    <span class="pin" style="--c:var(--lamp)">◆</span>
+    <span class="row-main"><span class="row-title">${esc(st.name)}</span><span class="row-sub">${distanceKm !== undefined ? `${distanceKm < 1 ? `${Math.round(distanceKm * 1000)} m` : `${distanceKm.toFixed(1).replace('.', ',')} km`} entfernt · ` : ''}Abfahrtstafel öffnen</span></span>
+    <span></span>
+  </li>`;
+}
+
+export function searchHitRow(m: DayModel, r: SimResult, hit: TripHit): string {
+  const T = m.trips[hit.trip];
+  const R = r.trips[hit.trip];
+  const at = shortName(m.stations[T.stops[hit.stop]].name);
+  const d = hit.stop === T.stops.length - 1 ? R.arr[hit.stop] - T.schedArr[hit.stop] : R.dep[hit.stop] - T.schedDep[hit.stop];
+  const known = R.known !== false;
+  const status = R.canceled ? 'fällt aus' : hit.status === 'running' ? 'unterwegs' : hit.status === 'upcoming' ? 'kommt noch' : 'angekommen';
+  const c = R.canceled ? 'var(--bad)' : known ? delayColor(d) : 'var(--nodata)';
+  return `<li class="row" data-trip="${hit.trip}">
+    ${lineBadge(m, hit.trip)}
+    <span class="row-main"><span class="row-title">${esc(endpoints(m, hit.trip))}</span><span class="row-sub">${hit.stop === 0 ? 'ab' : 'in'} ${esc(at)} ${hhmm(hit.time)} · ${status}</span></span>
+    <span class="delay" style="--c:${c}">${R.canceled ? '✕' : known ? fmtDelay(d) : '–'}</span>
+  </li>`;
+}
+
+// --- Verbindungen ------------------------------------------------------------
+
+const chanceColor = (p: number) => (p >= 0.9 ? 'var(--ok)' : p >= 0.7 ? '#a3e635' : p >= 0.4 ? 'var(--warn)' : 'var(--bad)');
+export const chanceLabel = (p: number) => (p >= 0.9 ? 'sicher' : p >= 0.7 ? 'wahrscheinlich' : p >= 0.4 ? 'knapp' : p >= 0.1 ? 'riskant' : 'kaum zu schaffen');
+
+const duration = (min: number) => `${Math.floor(min / 60)}:${String(Math.round(min % 60)).padStart(2, '0')} h`;
+
+/** Bisherige Beobachtungen eines Umstiegs: [Anzahl, verpasst] */
+export type TransferHistory = (station: string, from: string, to: string) => [number, number] | undefined;
+
+export function journeyCard(m: DayModel, j: Journey, recommended: boolean, now: number, history?: TransferHistory): string {
+  const late = j.predArr - j.schedArr;
+  const legs = j.legs
+    .map((l, i) => {
+      const T = m.trips[l.trip];
+      const via = i < j.legs.length - 1 ? `<span>→ ${esc(shortName(m.stations[T.stops[l.to]].name))} →</span>` : '';
+      return `<span class="line-badge" data-cat="${esc(T.category)}" data-trip="${l.trip}" role="button" tabindex="0">${esc(T.line)}</span>${via}`;
+    })
+    .join('');
+  const transfers = j.transfers
+    .map((t, k) => {
+      const c = chanceColor(t.probability);
+      const pred = Math.round(t.predicted);
+      const h = history?.(m.stations[t.station].name, m.trips[j.legs[k].trip].line, m.trips[j.legs[k + 1].trip].line);
+      const hist = h ? `<span class="fine" style="grid-column:1/-1;margin:0">Bisher ${h[0] - h[1]} von ${h[0]} Mal geklappt</span>` : '';
+      return `<div class="chance" style="--c:${c}">
+        <span>Umstieg ${esc(shortName(m.stations[t.station].name))}: geplant ${Math.round(t.planned)} Min, ${t.uncertain ? 'ohne Echtzeitdaten' : `heute ${pred < 0 ? `${-pred} Min zu spät` : `${pred} Min`}`} (nötig ${t.needed})</span>
+        <b>${Math.round(t.probability * 100)} % · ${chanceLabel(t.probability)}</b>
+        <span class="chance-bar"><span style="width:${Math.max(3, t.probability * 100)}%"></span></span>
+        ${hist}
+      </div>`;
+    })
+    .join('');
+  const past = j.predDep < now - 0.5;
+  return `<article class="journey${recommended ? ' is-recommended' : ''}${past ? ' is-past' : ''}">
+    <div class="journey-top">
+      <span class="journey-times">${hhmm(j.schedDep)} → ${hhmm(j.schedArr)}${!j.canceled && late >= 1 ? `<small style="color:${delayColor(late)}">+${Math.round(late)}</small>` : ''}</span>
+      ${recommended ? '<span class="pill" style="--c:var(--lamp)">Empfohlen</span>' : j.canceled ? '<span class="pill" style="--c:var(--bad)">Fällt aus</span>' : ''}
+    </div>
+    <div class="journey-meta">${duration(j.schedArr - j.schedDep)} · ${j.legs.length === 1 ? 'direkt' : `${j.legs.length - 1} Umstieg${j.legs.length > 2 ? 'e' : ''}`}${!j.canceled && late >= 1 ? ` · Ankunft voraussichtlich ${hhmm(j.predArr)}` : ''}</div>
+    <div class="journey-legs">${legs}</div>
+    ${transfers}
+  </article>`;
+}
+
+export function journeyVerdict(m: DayModel, res: JourneyResult): string {
+  const { journeys, recommended } = res;
+  if (recommended < 0) return '';
+  const rec = journeys[recommended];
+  const earliest = journeys.findIndex((j) => !j.canceled && j.predDep >= rec.predDep - 120 && j.schedArr < rec.schedArr);
+  const recText = `${hhmm(rec.schedDep)} mit ${rec.legs.map((l) => m.trips[l.trip].line).join(' → ')}`;
+  if (earliest >= 0 && earliest !== recommended) {
+    const fast = journeys[earliest];
+    const weak = fast.transfers.reduce((a, b) => (b.probability < a.probability ? b : a), fast.transfers[0]);
+    return `<div class="verdict"><strong>Nimm lieber ${esc(recText)}.</strong>Die planmäßig schnellere Verbindung um ${hhmm(fast.schedDep)} ist heute ${fast.canceled ? 'ausgefallen' : `riskant: Der Umstieg in ${esc(shortName(m.stations[weak.station].name))} klappt nur zu ${Math.round(weak.probability * 100)} %`}. Voraussichtliche Ankunft mit der Empfehlung: ${hhmm(rec.predArr)}.</div>`;
+  }
+  const tr = rec.transfers.length ? ` Umstieg${rec.transfers.length > 1 ? 'e' : ''} ${rec.transfers.map((t) => `${shortName(m.stations[t.station].name)} ${Math.round(t.probability * 100)} %`).join(', ')}.` : ' Ohne Umstieg.';
+  return `<div class="verdict"><strong>${esc(recText)} passt.</strong>Voraussichtliche Ankunft ${hhmm(rec.predArr)}.${esc(tr)}</div>`;
+}
+
+// --- Share my Train (Pain) ---------------------------------------------------------
+
+/** "Share my Train" – bei großer Verspätung wird Train durchgestrichen und Pain kommt dazu */
+export const shareBrand = (pain: boolean) =>
+  pain ? `<span class="brand is-pain">Share my <s>Train</s> <b>Pain</b></span>` : `<span class="brand">Share my <b>Train</b></span>`;
+
+/** Formular zum Teilen der eigenen Zugfahrt: Ausstieg wählen, Name optional. */
+export function sharePanel(m: DayModel, trip: number, fromStop: number, name: string, pain: boolean): string {
+  const T = m.trips[trip];
+  // Eingestiegen: irgendwo bis zum aktuellen Halt
+  const boards = T.stops
+    .map((s, i) => ({ s, i }))
+    .filter(({ i }) => i <= fromStop && i < T.stops.length - 1)
+    .map(({ s, i }) => `<option value="${i}"${i === 0 ? ' selected' : ''}>${esc(m.stations[s].name)} · ${hhmm(T.schedDep[i])}</option>`)
+    .join('');
+  const options = T.stops
+    .map((s, i) => ({ s, i }))
+    .filter(({ i }) => i > fromStop)
+    .map(({ s, i }) => `<option value="${i}"${i === T.stops.length - 1 ? ' selected' : ''}>${esc(m.stations[s].name)} · ${hhmm(T.schedArr[i])}</option>`)
+    .join('');
+  return `<section class="share-card">
+    <h3 class="share-title">${shareBrand(pain)}</h3>
+    <p class="fine">Schick deinen Liebsten einen Link: Sie sehen live, wo dein Zug gerade ist und wann du ankommst. Geteilt wird nur der Zug, nicht dein Standort.</p>
+    <div class="share-route">
+      <label class="field"><span class="eyebrow">Eingestiegen in</span><select id="share-from">${boards}</select></label>
+      <label class="field"><span class="eyebrow">Ich steige aus in</span><select id="share-to">${options}</select></label>
+    </div>
+    <p class="share-co2" id="share-co2"></p>
+    <label class="field"><span class="eyebrow">Dein Name (optional)</span><input id="share-name" type="text" maxlength="20" placeholder="z. B. Tobi" autocomplete="given-name" value="${esc(name)}" /></label>
+    <div class="share-actions">
+      <button class="cta cta--small" id="share-go">Link teilen</button>
+      <button class="ghost-btn" id="share-copy">Link kopieren</button>
+    </div>
+    <p class="fine" id="share-result" role="status"></p>
+  </section>`;
+}
+
+/** Ansicht für Empfänger eines geteilten Links */
+export function followCard(st: FollowStatus, who: string, stamp: number): string {
+  const c = st.state === 'canceled' ? 'var(--bad)' : st.known ? delayColor(st.delay) : 'var(--accent)';
+  const subject = who ? esc(who) : 'Der Zug';
+  const head =
+    st.state === 'canceled'
+      ? `${esc(st.line)} nach ${esc(st.to)} fällt aus`
+      : st.state === 'arrived'
+        ? `${subject} ist um <b>${hhmm(st.estArr)}</b> in <b>${esc(st.target)}</b> angekommen`
+        : `${subject} kommt um <b>${hhmm(st.estArr)}</b> in <b>${esc(st.target)}</b> an`;
+  const delay =
+    st.state === 'canceled'
+      ? 'Bitte nach einer anderen Verbindung schauen.'
+      : !st.known
+        ? `Planmäßig ${hhmm(st.schedArr)}, noch keine Echtzeitdaten`
+        : st.delay >= 1
+          ? `${st.delay} Min später als geplant (${hhmm(st.schedArr)})`
+          : 'Pünktlich';
+  const left = st.minutesLeft >= 60 ? `${Math.floor(st.minutesLeft / 60)} h ${st.minutesLeft % 60} Min` : `${st.minutesLeft} Min`;
+  const pct = (st.progress * 100).toFixed(1);
+  const pain = isPain(st.delay, st.state === 'canceled');
+  return `<section class="follow${pain ? ' is-pain' : ''}" style="--c:${c}">
+    <span class="follow-brand">${shareBrand(pain)}<span class="follow-line"><span class="live-dot"></span>${esc(st.line)} live</span></span>
+    <p class="follow-head">${head}</p>
+    <p class="follow-delay">${delay}</p>
+    <div class="follow-bar" role="img" aria-label="${Math.round(st.progress * 100)} % der Strecke geschafft"><span style="width:${pct}%"></span><i style="left:${pct}%"></i></div>
+    <div class="follow-ends"><span>${esc(st.board)}</span><span>${esc(st.target)}</span></div>
+    <p class="follow-where">${st.state === 'running' || st.state === 'before' ? `${esc(st.where.charAt(0).toUpperCase() + st.where.slice(1))}${st.next && st.next.name !== st.target ? ` · nächster Halt ${esc(st.next.name)} ${hhmm(st.next.time)}` : ''} · noch ${left}` : esc(st.where.charAt(0).toUpperCase() + st.where.slice(1))}</p>
+    ${co2Line(st) ? `<p class="follow-co2">${esc(co2Line(st))}</p>` : ''}
+    <p class="fine">Aktualisiert sich automatisch, Stand ${hhmm(stamp)}. Geteilt wurde nur der Zug, kein Standort. CO₂-Werte: Umweltbundesamt, Bezugsjahr 2024.</p>
+  </section>`;
 }

@@ -1,0 +1,357 @@
+[
+ {
+  "name": "München Hbf",
+  "eva": "8000261",
+  "iris": "München Hbf"
+ },
+ {
+  "name": "Köln Hbf",
+  "eva": "8000207",
+  "iris": "Köln Hbf"
+ },
+ {
+  "name": "Berlin Hbf",
+  "eva": "8011160",
+  "iris": "Berlin Hbf"
+ },
+ {
+  "name": "Frankfurt (Main) Hbf",
+  "eva": "8000105",
+  "iris": "Frankfurt(Main)Hbf"
+ },
+ {
+  "name": "Hannover Hbf",
+  "eva": "8000152",
+  "iris": "Hannover Hbf"
+ },
+ {
+  "name": "Nürnberg Hbf",
+  "eva": "8000284",
+  "iris": "Nürnberg Hbf"
+ },
+ {
+  "name": "Berlin Südkreuz",
+  "eva": "8011113",
+  "iris": "Berlin Südkreuz"
+ },
+ {
+  "name": "Dortmund Hbf",
+  "eva": "8000080",
+  "iris": "Dortmund Hbf"
+ },
+ {
+  "name": "Mannheim Hbf",
+  "eva": "8000244",
+  "iris": "Mannheim Hbf"
+ },
+ {
+  "name": "Düsseldorf Hbf",
+  "eva": "8000085",
+  "iris": "Düsseldorf Hbf"
+ },
+ {
+  "name": "Hamburg Hbf",
+  "eva": "8002549",
+  "iris": "Hamburg Hbf"
+ },
+ {
+  "name": "Stuttgart Hbf",
+  "eva": "8000096",
+  "iris": "Stuttgart Hbf"
+ },
+ {
+  "name": "Berlin Gesundbrunnen",
+  "eva": "8011102",
+  "iris": "Berlin Gesundbrunnen"
+ },
+ {
+  "name": "Hamburg-Harburg",
+  "eva": "8000147",
+  "iris": "Hamburg-Harburg"
+ },
+ {
+  "name": "Karlsruhe Hbf",
+  "eva": "8000191",
+  "iris": "Karlsruhe Hbf"
+ },
+ {
+  "name": "Hamburg-Altona",
+  "eva": "8002553",
+  "iris": "Hamburg-Altona"
+ },
+ {
+  "name": "Augsburg Hbf",
+  "eva": "8000013",
+  "iris": "Augsburg Hbf"
+ },
+ {
+  "name": "Erfurt Hbf",
+  "eva": "8010101",
+  "iris": "Erfurt Hbf"
+ },
+ {
+  "name": "Berlin Ostkreuz",
+  "eva": "8011162",
+  "iris": "Berlin Ostkreuz"
+ },
+ {
+  "name": "Ulm Hbf",
+  "eva": "8000170",
+  "iris": "Ulm Hbf"
+ },
+ {
+  "name": "Essen Hbf",
+  "eva": "8000098",
+  "iris": "Essen Hbf"
+ },
+ {
+  "name": "Hamburg Dammtor",
+  "eva": "8002548",
+  "iris": "Hamburg Dammtor"
+ },
+ {
+  "name": "Würzburg Hbf",
+  "eva": "8000260",
+  "iris": "Würzburg Hbf"
+ },
+ {
+  "name": "Wuppertal Hbf",
+  "eva": "8000266",
+  "iris": "Wuppertal Hbf"
+ },
+ {
+  "name": "Göttingen",
+  "eva": "8000128",
+  "iris": "Göttingen"
+ },
+ {
+  "name": "Kassel Wilhelmshöhe",
+  "eva": "8003200",
+  "iris": "Kassel-Wilhelmshöhe"
+ },
+ {
+  "name": "Leipzig Hbf",
+  "eva": "8010205",
+  "iris": "Leipzig Hbf"
+ },
+ {
+  "name": "Bremen Hbf",
+  "eva": "8000050",
+  "iris": "Bremen Hbf"
+ },
+ {
+  "name": "Fulda",
+  "eva": "8000115",
+  "iris": "Fulda"
+ },
+ {
+  "name": "Hagen Hbf",
+  "eva": "8000142",
+  "iris": "Hagen Hbf"
+ },
+ {
+  "name": "Halle (Saale) Hbf",
+  "eva": "8010159",
+  "iris": "Halle(Saale)Hbf"
+ },
+ {
+  "name": "Bielefeld Hbf",
+  "eva": "8000036",
+  "iris": "Bielefeld Hbf"
+ },
+ {
+  "name": "Braunschweig Hbf",
+  "eva": "8000049",
+  "iris": "Braunschweig Hbf"
+ },
+ {
+  "name": "Magdeburg Hbf",
+  "eva": "8010224",
+  "iris": "Magdeburg Hbf"
+ },
+ {
+  "name": "Heidelberg Hbf",
+  "eva": "8000156",
+  "iris": "Heidelberg Hbf"
+ },
+ {
+  "name": "Hanau Hbf",
+  "eva": "8000150",
+  "iris": "Hanau Hbf"
+ },
+ {
+  "name": "Berlin Lichtenberg",
+  "eva": "8010036",
+  "iris": "Berlin-Lichtenberg"
+ },
+ {
+  "name": "Osnabrück Hbf",
+  "eva": "8000294",
+  "iris": "Osnabrück Hbf"
+ },
+ {
+  "name": "Hamm (Westf) Hbf",
+  "eva": "8000149",
+  "iris": "Hamm(Westf)Hbf"
+ },
+ {
+  "name": "Bochum Hbf",
+  "eva": "8000041",
+  "iris": "Bochum Hbf"
+ },
+ {
+  "name": "Berlin Potsdamer Platz",
+  "eva": "8011118",
+  "iris": "Berlin Potsdamer Platz"
+ },
+ {
+  "name": "Mainz Hbf",
+  "eva": "8000240",
+  "iris": "Mainz Hbf"
+ },
+ {
+  "name": "Basel Bad",
+  "eva": "8000026",
+  "iris": "Basel Bad Bf"
+ },
+ {
+  "name": "Duisburg Hbf",
+  "eva": "8000086",
+  "iris": "Duisburg Hbf"
+ },
+ {
+  "name": "Offenburg",
+  "eva": "8000290",
+  "iris": "Offenburg"
+ },
+ {
+  "name": "Dresden Neustadt",
+  "eva": "8010089",
+  "iris": "Dresden-Neustadt"
+ },
+ {
+  "name": "Berlin Charlottenburg",
+  "eva": "8089165",
+  "iris": "Berlin Charlottenburg (S)"
+ },
+ {
+  "name": "Aschaffenburg Hbf",
+  "eva": "8000010",
+  "iris": "Aschaffenburg Hbf"
+ },
+ {
+  "name": "Berlin Spandau",
+  "eva": "8010404",
+  "iris": "Berlin-Spandau"
+ },
+ {
+  "name": "Koblenz Hbf",
+  "eva": "8000206",
+  "iris": "Koblenz Hbf"
+ },
+ {
+  "name": "Solingen Hbf",
+  "eva": "8000087",
+  "iris": "Solingen Hbf"
+ },
+ {
+  "name": "Berlin Schöneweide",
+  "eva": "8010041",
+  "iris": "Berlin-Schöneweide"
+ },
+ {
+  "name": "Bonn Hbf",
+  "eva": "8000044",
+  "iris": "Bonn Hbf"
+ },
+ {
+  "name": "Hamburg Jungfernstieg",
+  "eva": "8003137",
+  "iris": "Hamburg Jungfernstieg"
+ },
+ {
+  "name": "Hamburg Stadthausbrücke",
+  "eva": "8005663",
+  "iris": "Hamburg Stadthausbrücke"
+ },
+ {
+  "name": "Hamburg Landungsbrücken",
+  "eva": "8003518",
+  "iris": "Hamburg Landungsbrücken"
+ },
+ {
+  "name": "Hamburg Reeperbahn",
+  "eva": "8006705",
+  "iris": "Hamburg Reeperbahn"
+ },
+ {
+  "name": "Hamburg Königstraße",
+  "eva": "8006706",
+  "iris": "Hamburg Königstraße"
+ },
+ {
+  "name": "Berlin Alexanderplatz",
+  "eva": "8011155",
+  "iris": "Berlin Alexanderplatz"
+ },
+ {
+  "name": "Potsdam Hbf",
+  "eva": "8012666",
+  "iris": "Potsdam Hbf"
+ },
+ {
+  "name": "Berlin Zoologischer Garten",
+  "eva": "8010406",
+  "iris": "Berlin Zoologischer Garten"
+ },
+ {
+  "name": "Hamburg Hasselbrook",
+  "eva": "8002628",
+  "iris": "Hamburg Hasselbrook"
+ },
+ {
+  "name": "Aachen Hbf",
+  "eva": "8000001",
+  "iris": "Aachen Hbf"
+ },
+ {
+  "name": "Dresden Hbf",
+  "eva": "8010085",
+  "iris": "Dresden Hbf"
+ },
+ {
+  "name": "Ingolstadt Hbf",
+  "eva": "8000183",
+  "iris": "Ingolstadt Hbf"
+ },
+ {
+  "name": "Berlin Wannsee",
+  "eva": "8010405",
+  "iris": "Berlin-Wannsee"
+ },
+ {
+  "name": "Lüneburg",
+  "eva": "8000238",
+  "iris": "Lüneburg"
+ },
+ {
+  "name": "Gelsenkirchen Hbf",
+  "eva": "8000118",
+  "iris": "Gelsenkirchen Hbf"
+ },
+ {
+  "name": "Hamburg Berliner Tor",
+  "eva": "8000908",
+  "iris": "Hamburg Berliner Tor"
+ },
+ {
+  "name": "Hamburg Barmbek",
+  "eva": "8000805",
+  "iris": "Hamburg-Barmbek"
+ },
+ {
+  "name": "Hamburg Friedrichsberg",
+  "eva": "8002106",
+  "iris": "Hamburg Friedrichsberg"
+ }
+]

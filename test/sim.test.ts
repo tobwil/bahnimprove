@@ -5,7 +5,7 @@ import { HEADWAY, defaultPolicy, simulate } from '../src/sim/engine.ts';
 import { ArrivalIndex, trainAt } from '../src/sim/live.ts';
 import { buildDayModel, edgeKey, type DayModel } from '../src/sim/model.ts';
 import type { SimResult, Timetable } from '../src/sim/types.ts';
-import { cleanName } from '../scripts/build-timetable.ts';
+import { cleanName } from '../src/data/gtfs.ts';
 
 const tt = JSON.parse(readFileSync(new URL('../public/data/timetable.json', import.meta.url), 'utf8')) as Timetable;
 const date = tt.dates[1];

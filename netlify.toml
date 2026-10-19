@@ -4,3 +4,21 @@
 
 [build.environment]
   NODE_VERSION = "22"
+
+# Teilbarer Wochenbericht
+[[redirects]]
+  from = "/bericht"
+  to = "/index.html"
+  status = 200
+
+# Datenschutzerklärung als eigene Adresse
+[[redirects]]
+  from = "/datenschutz"
+  to = "/index.html"
+  status = 200
+
+# Impressum als eigene Adresse
+[[redirects]]
+  from = "/impressum"
+  to = "/index.html"
+  status = 200

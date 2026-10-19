@@ -1,6 +1,8 @@
-# Bahnimprove · Leitstand Fernverkehr
+# Share my Train
 
-Pixel-Leitstand für den deutschen Fernverkehr: eine Live-Karte aller ICE/IC/EC-Fahrten mit Verspätungen und Störungen, dazu ein **Tagesbericht**, der durchrechnet, welche Dispositionsentscheidungen die Pünktlichkeit bzw. die Fahrgastminuten verbessert hätten.
+Unabhängiges Hobby- und Civic-Tech-Projekt: **alle Züge in Deutschland** (Fern- und Regionalverkehr, S-Bahn) live auf einer Pixelkarte mit echten Verspätungen. Dazu gibt es eine Verbindungssuche mit Umstiegsprognose für Fahrgäste und offene **Lessons learned für die Bahn** aus beobachteten Ist-Daten.
+
+Live: https://sharemytrain.de und https://train.kisruptiv.de (bis die Domains aufgeschaltet sind: https://bahnimprove-leitstand.netlify.app) · Wochenbericht: https://sharemytrain.de/bericht
 
 > **Echte Daten.** Soll-Fahrplan und Ist-Zeiten stammen aus den offenen Feeds von gtfs.de (DELFI e.V.): GTFS für den Fahrplan (~1.000 Fernverkehrsfahrten pro Tag), GTFS-Realtime für Verspätungen, Prognosen und Ausfälle. Eine Netlify Function sammelt den Feed alle 2 Minuten, damit der ganze Tag für den Tagesbericht vorliegt. Gibt es für einen Tag keine Echtzeitdaten, schaltet die App sichtbar auf eine Simulation um.
 
@@ -15,6 +17,37 @@ Pixel-Leitstand für den deutschen Fernverkehr: eine Live-Karte aller ICE/IC/EC-
   - Umschaltbares Ziel: **Pünktlichkeit** (DB-Kennzahl) oder **Fahrgäste** (Menschen statt Züge)
   - Ursachenanteile, teuerste Störungen, Knoten mit dem größten Verspätungszuwachs, „Verspätungs-Verbreiter“
 
+### Für Fahrgäste
+
+- **Suche** über alle Fernverkehrsfahrten des Tages: Linie („ICE 28“), Bahnhof („Köln“, auch ohne Umlaute) oder Strecke („Köln München“).
+- **Standort** mit einem Tipp. Danach zeigt die App den nächsten Bahnhof mit Abfahrtstafel und trägt ihn als Start der Reise ein. Wer einmal zugestimmt hat, wird beim nächsten Besuch automatisch gefunden.
+- **Reise**: Verbindungssuche im Fernverkehr mit bis zu zwei Umstiegen. Für jeden Umstieg schätzt die App aus der aktuellen Verspätung, wie wahrscheinlich er klappt. Empfohlen wird die Verbindung mit der besten *erwarteten* Ankunft, also unter Berücksichtigung, dass ein Umstieg platzen kann.
+
+### Lessons learned für die DB
+
+`src/insights/aggregate.ts` verdichtet jeden Tag ausschließlich **beobachtete** Ist-Werte (keine Prognosen) und addiert sie über bis zu 28 Tage:
+
+- Fahrzeitverluste je Abschnitt → „Fahrzeit ehrlich planen oder Ursache beheben“
+- Haltezeit-Überschreitungen je Bahnhof → „Haltezeit/Fahrgastwechsel“
+- Verspätete Starts je Startbahnhof → „Bereitstellung prüfen“
+- Platzende Umstiege → „Übergangszeit oder Anschlusssicherung“
+- Mitgebrachte Verspätung aus dem Ausland
+- Abschnitte mit regelmäßiger Aufholung → „Hier steckt Reserve“
+
+Ein Befund ist **belastbar** ab 40 Fällen aus mindestens 7 Tagen, und nur wenn er an der Mehrzahl der Tage auftritt (Dauerproblem statt Einzelstörung). Die Function `build-insights` verdichtet jede Nacht den abgeschlossenen Tag, `GET /api/insights` liefert das Ergebnis.
+
+### Regionalverkehr in Kacheln
+
+Rund 43.000 Regionalfahrten am Tag sind zu viel für ein Handy. Ein nächtlicher Job (`build-static-background`, ausgelöst von `refresh-static`) bereitet deshalb Fern- und Regionalverkehr aus gtfs.de auf. Der Regionalverkehr landet in Kacheln von 0,5° × 0,75°, also etwa 55 × 52 km, in Netlify Blobs. Die App lädt nur die Kacheln, die sie braucht: den sichtbaren Ausschnitt (ab Zoom 2,2), den eigenen Standort, einen Bahnhof sowie Start und Ziel einer Reise. `GET /api/rv?date=&tile=` liefert eine Kachel samt Echtzeitdaten. Die Verbindungssuche verknüpft Regionalzüge rund um Start und Ziel mit dem bundesweiten Fernverkehr.
+
+### Verspätungsgründe
+
+`collect-reasons` fragt alle 10 Minuten die IRIS-Schnittstelle der DB für rund 70 große Bahnhöfe ab (`public/data/iris-stations.json`, erzeugt mit `scripts/build-iris-stations.ts`). Die Funktion zählt die gemeldeten Grundcodes, etwa „Verspätung aus vorheriger Fahrt“ oder „Reparatur an der Strecke“. Die Lessons learned zeigen sie je Bahnhof und gruppiert nach Hebel: Infrastruktur, Betriebsablauf, Fahrzeuge, äußere Einflüsse.
+
+### Offene Daten
+
+`GET /api/open-data` (Index) bzw. `?date=YYYYMMDD` liefert die Tageswerte, `GET /api/insights` die Befunde. Die Action `open-data.yml` sichert beides jeden Montag nach [`open-data/`](open-data/) und schreibt einen lesbaren Wochenbericht.
+
 ## Starten
 
 ```bash
@@ -22,7 +55,7 @@ npm install
 npm run dev        # http://localhost:5173
 npm test
 npm run build      # statisches Bundle in dist/
-npm run data       # Fahrplan (gtfs.de) und Kartengrenzen neu erzeugen
+npm run data       # Fahrpläne (gtfs.de, Fern- + Regionalverkehr) und Kartengrenzen neu erzeugen
 npm run realtime   # Echtzeit einmal abrufen → public/data/realtime/YYYYMMDD.json
 npm run realtime -- --watch   # lokal alle 2 Minuten sammeln
 ```
@@ -66,8 +99,21 @@ src/main.ts                  App, Zeitsteuerung, Seitenleiste
 3. **Spielmodus „Schatten-Fahrdienstleiter“**: Echte Entscheidungssituationen tagsüber („RE wartet auf ICE +7?“), abends die Auswertung gegen die Realität, mit Punkten, Rängen und Achievements.
 4. **Zeitraffer-Export** des Tages als GIF bzw. Video zum Teilen.
 
+## Betrieb auf Netlify
+
+- Umgebungsvariable `STATIC_BUILD_SECRET` (beliebiger geheimer Wert) schützt den nächtlichen Fahrplan-Job.
+- Geplante Functions: `collect-realtime` (alle 2 Min.), `collect-reasons` (alle 10 Min.), `build-insights` (nachts), `refresh-static` (nachts).
+- Der kostenlose Plan reicht für ein Hobbyprojekt. Bei viel Besuch zählen vor allem die Abrufe der Regionalkacheln (CDN-Cache 2 Minuten).
+
+## Lizenzen
+
+- Code: [MIT](LICENSE)
+- Offene Daten in `open-data/` und unter `/api/*`: CC BY-SA 4.0 (abgeleitet aus dem Echtzeit-Feed unter CC BY-SA 4.0), Quellenangabe „Share my Train (sharemytrain.de), Daten: DELFI e.V./gtfs.de, Deutsche Bahn (IRIS)“
+
 ## Datenquellen & Lizenzen
 
-- Fahrplan und Echtzeit: [gtfs.de](https://gtfs.de) (Fernverkehr-GTFS und GTFS-Realtime „free“), Daten von DELFI e.V., CC BY 4.0. Vor einer kommerziellen Nutzung die Bedingungen von gtfs.de prüfen.
+- Fahrplan: [gtfs.de](https://gtfs.de) (freie GTFS-Basisversion, Daten von DELFI e.V., CC BY 4.0, Gültigkeit 30 Tage)
+- Echtzeit: [gtfs.de GTFS-Realtime](https://gtfs.de/de/realtime/) „free“, CC BY-SA 4.0 (kommerzielle Nutzung mit Namensnennung und Weitergabe unter gleichen Bedingungen erlaubt; einzelne Quellen im Feed haben laut gtfs.de eigene Vereinbarungen). Abruf nur serverseitig alle 2 Minuten.
 - Landesgrenzen: [Natural Earth](https://www.naturalearthdata.com) über `world-atlas`, Public Domain
-- Schriften: Silkscreen, VT323 (Google Fonts, OFL)
+- Verspätungsgründe: öffentliche IRIS-Schnittstelle der Deutschen Bahn
+- Schriften: Geist, Pixelify Sans, Silkscreen (OFL), lokal ausgeliefert über Fontsource, keine Anfragen an Google

@@ -35,6 +35,7 @@ const PALETTE = {
   border: ['#1f2a40', '#3a4a66'],
   deBorder: ['#2c4a44', '#5c8a6a'],
   track0: ['#18213a', '#33415e'],
+  rvTrack: ['#26324f', '#3f4d6e'],
   track1: ['#24304f', '#46587c'],
   track2: ['#34446b', '#6177a0'],
 } as const;
@@ -45,10 +46,15 @@ const C = {
   lamp: px('#ffc56b'),
   lampDim: px('#b3803a'),
   label: px('#e3e9f8'),
+  labelDim: px('#8d98b8'),
   labelShadow: px('#05070f'),
   route: px('#ffc56b'),
+  routePast: px('#6e5530'),
+  tagText: px('#05070f'),
   routeGlow: px('#ff9e3d'),
   select: px('#ffffff'),
+  user: px('#4aa8ff'),
+  userRing: px('#2f7fd8'),
   hot: [px('#ff4f6e'), px('#c23a55'), px('#7d2538')],
 };
 
@@ -61,6 +67,16 @@ export const DELAY_COLORS = [
 const TRAIN_PX = DELAY_COLORS.map((d) => ({ max: d.max, head: px(d.color), tail: px(d.tail) }));
 /** Fahrt ohne Echtzeitdaten */
 const TRAIN_UNKNOWN = { max: Infinity, head: px('#7a84a8'), tail: px('#353f5f') };
+
+/** Farbe a zu t Anteilen in Richtung b gemischt */
+function mixHex(a: string, b: string, t: number): string {
+  const pa = parseInt(a.slice(1), 16), pb = parseInt(b.slice(1), 16);
+  const ch = (sh: number) => Math.round(((pa >> sh) & 255) * (1 - t) + ((pb >> sh) & 255) * t);
+  return `#${((ch(16) << 16) | (ch(8) << 8) | ch(0)).toString(16).padStart(6, '0')}`;
+}
+/** Im Fokus auf einen Zug treten alle anderen zurück */
+const TRAIN_DIM = DELAY_COLORS.map((d) => ({ max: d.max, head: px(mixHex(d.color, '#1c2541', 0.62)), tail: px(mixHex(d.tail, '#1c2541', 0.7)) }));
+const TRAIN_UNKNOWN_DIM = { max: Infinity, head: px('#3a4361'), tail: px('#262e48') };
 
 const SPRITES: Record<string, { rows: string[]; colors: Record<string, number> }> = {
   block: { rows: ['..r..', '.rwr.', '.rwr.', 'rrrrr', 'rrwrr'], colors: { r: px('#ff4f6e'), w: px('#ffffff') } },
@@ -103,7 +119,13 @@ export interface Frame {
   minute: number;
   /** Laufzeit in ms (für Animationen) */
   now: number;
+  /** Eigener Standort */
+  user?: { lon: number; lat: number };
+  /** Fahrten mit id ≥ fvCount sind Regionalzüge (kleiner gezeichnet) */
+  fvCount?: number;
 }
+
+export type LabelMode = 'few' | 'many' | 'off';
 
 export class PixelMap {
   private ctx: CanvasRenderingContext2D;
@@ -124,9 +146,16 @@ export class PixelMap {
   insets = { top: 0, bottom: 0 };
   private baseScale = 1;
   private edges: { a: number; b: number; n: number }[] = [];
+  /** Gleise, die nur Regionalzüge nutzen */
+  private rvEdges: { a: number; b: number }[] = [];
+  private usedStations = new Set<number>();
   private stationXY = new Float32Array(0);
   private lastTrains: { x: number; y: number; trip: number }[] = [];
   private dirty = true;
+  /** Wie viele Bahnhöfe beschriftet werden: wenige große, viele oder keine */
+  private labelMode: LabelMode = 'few';
+  /** Eigener Standort: Platz für die Marke "DU" freihalten */
+  private userPos?: { lon: number; lat: number };
   private lightLevel = -1;
   private cityLights: { station: number; dx: number; dy: number; warm: boolean }[] = [];
 
@@ -134,26 +163,44 @@ export class PixelMap {
     readonly canvas: HTMLCanvasElement,
     readonly glowCanvas: HTMLCanvasElement,
     private mapData: MapData,
-    private model: DayModel,
+    public model: DayModel,
   ) {
     this.ctx = canvas.getContext('2d')!;
     this.glowCtx = glowCanvas.getContext('2d')!;
     this.setModel(model);
   }
 
-  setModel(model: DayModel) {
+  setLabelMode(mode: LabelMode) {
+    if (mode === this.labelMode) return;
+    this.labelMode = mode;
+    this.dirty = true;
+  }
+
+  setModel(model: DayModel, fvCount = model.trips.length) {
     this.model = model;
     const usage = new Map<number, { a: number; b: number; n: number }>();
+    const rv = new Map<number, { a: number; b: number }>();
     for (const t of model.trips) {
+      const regional = t.id >= fvCount;
       for (let i = 0; i + 1 < t.stops.length; i++) {
         const a = Math.min(t.stops[i], t.stops[i + 1]), b = Math.max(t.stops[i], t.stops[i + 1]);
         const k = a * 100000 + b;
+        if (regional) {
+          if (!rv.has(k)) rv.set(k, { a, b });
+          continue;
+        }
         const e = usage.get(k);
         if (e) e.n++;
         else usage.set(k, { a, b, n: 1 });
       }
     }
     this.edges = [...usage.values()].sort((x, y) => x.n - y.n);
+    this.rvEdges = [...rv.entries()].filter(([k]) => !usage.has(k)).map(([, e]) => e);
+    this.usedStations = new Set<number>();
+    for (const e of [...this.edges, ...this.rvEdges]) {
+      this.usedStations.add(e.a);
+      this.usedStations.add(e.b);
+    }
     // Stadtlichter: feste Muster um große Bahnhöfe
     this.cityLights = [];
     let seed = 7;
@@ -321,13 +368,14 @@ export class PixelMap {
         if (l.warm && night > 0.5) glow[y * w + x] = C.lampDim;
       }
     }
+    // Regionalgleise dezent, darüber der Fernverkehr
+    for (const e of this.rvEdges) this.line(buf, this.stationXY[e.a * 2], this.stationXY[e.a * 2 + 1], this.stationXY[e.b * 2], this.stationXY[e.b * 2 + 1], P.rvTrack);
     const maxN = this.edges.length ? this.edges[this.edges.length - 1].n : 1;
     for (const e of this.edges) {
       const level = e.n > maxN * 0.35 ? P.track2 : e.n > maxN * 0.1 ? P.track1 : P.track0;
       this.line(buf, this.stationXY[e.a * 2], this.stationXY[e.a * 2 + 1], this.stationXY[e.b * 2], this.stationXY[e.b * 2 + 1], level);
     }
-    const used = new Set<number>();
-    for (const e of this.edges) { used.add(e.a); used.add(e.b); }
+    const used = this.usedStations;
     for (const i of used) {
       const s = st[i];
       if (/\(Gr\)|Grenze/.test(s.name)) continue;
@@ -335,21 +383,32 @@ export class PixelMap {
       if (s.weight > 300) {
         this.rect(buf, x - 1, y - 1, 2, 2, night > 0.5 ? C.lamp : C.hub);
         if (night > 0.3) this.rect(glow, x - 1, y - 1, 2, 2, C.lamp);
-      } else this.set(buf, x, y, s.weight > 100 ? C.hub : C.station);
+      } else if (s.weight > 0 || this.zoom >= 2.5) this.set(buf, x, y, s.weight > 100 ? C.hub : C.station);
     }
     this.renderLabels(buf, used);
   }
 
   private renderLabels(buf: Uint32Array, used: Set<number>) {
+    if (this.labelMode === 'off') return;
     const st = this.model.stations;
-    const candidates = [...used].filter((i) => inGermany(st[i]) && !/\(Gr\)|Grenze/.test(st[i].name)).sort((a, b) => st[b].weight - st[a].weight);
+    const many = this.labelMode === 'many';
+    // "Wenige": nur Fernverkehrshalte, erst ganz nah auch kleinere Bahnhöfe; dazu mehr Abstand,
+    // damit die Züge zwischen den Namen sichtbar bleiben
+    const rank = (i: number) => st[i].weight * 10 + (many ? (this.zoom >= 4 ? (st[i].w ?? 0) : 0) : this.zoom >= 7 ? (st[i].w ?? 0) / 4 : 0);
+    const candidates = [...used].filter((i) => inGermany(st[i]) && !/\(Gr\)|Grenze/.test(st[i].name) && rank(i) > 0).sort((a, b) => rank(b) - rank(a));
     const taken: { x: number; y: number; w: number; h: number }[] = [];
+    if (this.userPos) {
+      const [ux, uy] = this.project(this.userPos.lon, this.userPos.lat);
+      taken.push({ x: Math.round(ux) - 4, y: Math.round(uy) - 4, w: textWidth('DU') + 10, h: 8 });
+    }
     const names = new Set<string>();
-    const maxLabels = Math.max(9, Math.round(14 * this.zoom * Math.min(1.6, (this.w * this.h) / 120000)));
+    const area = Math.min(1.6, (this.w * this.h) / 120000);
+    const maxLabels = many ? Math.max(9, Math.round(14 * this.zoom * area)) : Math.max(8, Math.round((6 + 3 * this.zoom) * area));
+    const gapX = many ? 3 : 12, gapY = many ? 2 : 8;
     for (const i of candidates) {
       if (taken.length >= maxLabels) break;
       const name = shortName(st[i].name).split(/[ ,]/)[0];
-      if (names.has(name) && this.zoom < 3) continue;
+      if (names.has(name) && (this.zoom < 3 || !many)) continue;
       const label = this.zoom >= 3 ? shortName(st[i].name) : name;
       const x = Math.round(this.stationXY[i * 2]), y = Math.round(this.stationXY[i * 2 + 1]);
       const tw = textWidth(label);
@@ -362,12 +421,12 @@ export class PixelMap {
       const spot = opts.find(
         (o) =>
           o.x > 1 && o.y > 1 && o.x + tw < this.w - 1 && o.y + 6 < this.h &&
-          !taken.some((r) => o.x < r.x + r.w + 3 && o.x + tw + 3 > r.x && o.y < r.y + r.h + 2 && o.y + 7 > r.y),
+          !taken.some((r) => o.x < r.x + r.w + gapX && o.x + tw + gapX > r.x && o.y < r.y + r.h + gapY && o.y + 5 + gapY > r.y),
       );
       if (!spot) continue;
       taken.push({ x: spot.x, y: spot.y, w: tw, h: 5 });
       names.add(name);
-      drawText(buf, this.w, this.h, spot.x, spot.y, label, C.label, C.labelShadow);
+      drawText(buf, this.w, this.h, spot.x, spot.y, label, st[i].weight > 100 ? C.label : C.labelDim, C.labelShadow);
     }
   }
 
@@ -418,6 +477,10 @@ export class PixelMap {
 
   draw(f: Frame) {
     this.resize();
+    if (f.user?.lon !== this.userPos?.lon || f.user?.lat !== this.userPos?.lat) {
+      this.userPos = f.user;
+      this.dirty = true;
+    }
     const light = Math.round(daylight(f.minute) * 16) / 16;
     if (this.dirty || light !== this.lightLevel) {
       this.renderStatic(light);
@@ -431,8 +494,12 @@ export class PixelMap {
     const m = this.model;
     const blink = Math.floor(f.now / 420) % 2 === 0;
 
+    // Fokus auf einen Zug: alles andere tritt zurück, Brennpunkte pausieren
+    const focus = f.selected.train !== undefined;
+    const selState = focus ? f.trains.find((t) => t.trip === f.selected.train) : undefined;
+
     // Brennpunkte: pulsierende Ringe
-    for (const hs of f.hotspots) {
+    for (const hs of focus ? [] : f.hotspots) {
       const x = xy[hs.station * 2], y = xy[hs.station * 2 + 1];
       const phase = ((f.now / 1400 + hs.station * 0.137) % 1 + 1) % 1;
       const r = 2 + phase * (4 + hs.intensity * 8);
@@ -443,11 +510,15 @@ export class PixelMap {
 
     if (f.selected.train !== undefined) {
       const T = m.trips[f.selected.train];
+      // Gefahrener Teil gedämpft, vor dem Zug leuchtend, Halte als Punkte
+      const at = selState?.stop ?? (f.minute < T.schedDep[0] ? 0 : T.stops.length - 1);
       for (let i = 0; i + 1 < T.stops.length; i++) {
         const a = T.stops[i], b = T.stops[i + 1];
-        this.line(buf, xy[a * 2], xy[a * 2 + 1], xy[b * 2], xy[b * 2 + 1], C.route);
-        this.line(glow, xy[a * 2], xy[a * 2 + 1], xy[b * 2], xy[b * 2 + 1], C.routeGlow);
+        const ahead = i >= at;
+        this.line(buf, xy[a * 2], xy[a * 2 + 1], xy[b * 2], xy[b * 2 + 1], ahead ? C.route : C.routePast);
+        if (ahead) this.line(glow, xy[a * 2], xy[a * 2 + 1], xy[b * 2], xy[b * 2 + 1], C.routeGlow);
       }
+      T.stops.forEach((st, i) => this.rect(buf, Math.round(xy[st * 2]) - 1, Math.round(xy[st * 2 + 1]) - 1, 3, 3, i > at ? C.route : C.routePast));
     }
 
     for (const inc of f.incidents) {
@@ -465,7 +536,9 @@ export class PixelMap {
     const sorted = [...f.trains].sort((a, b) => Number(a.known) - Number(b.known) || a.delay - b.delay);
     this.lastTrains = [];
     const big = this.zoom >= 1.6 || this.pixelSize === 2;
+    const fvCount = f.fvCount ?? Infinity;
     for (const s of sorted) {
+      const regional = s.trip >= fvCount;
       const T = m.trips[s.trip];
       const a = T.stops[s.stop];
       const b = T.stops[Math.min(s.stop + 1, T.stops.length - 1)];
@@ -473,33 +546,62 @@ export class PixelMap {
       const x = ax + (bx - ax) * s.progress, y = ay + (by - ay) * s.progress;
       const len = Math.hypot(bx - ax, by - ay) || 1;
       const dx = (bx - ax) / len, dy = (by - ay) / len;
-      const col = s.known ? TRAIN_PX.find((c) => s.delay < c.max)! : TRAIN_UNKNOWN;
+      const dim = focus && s.trip !== f.selected.train;
+      const col = s.known ? (dim ? TRAIN_DIM : TRAIN_PX).find((c) => s.delay < c.max)! : dim ? TRAIN_UNKNOWN_DIM : TRAIN_UNKNOWN;
       if (!s.atStation) {
-        this.set(buf, x - dx * 3, y - dy * 3, col.tail);
+        if (!regional) this.set(buf, x - dx * 3, y - dy * 3, col.tail);
         this.set(buf, x - dx * 2, y - dy * 2, col.tail);
       }
-      if (big) this.rect(buf, Math.round(x - 0.5), Math.round(y - 0.5), 2, 2, col.head);
+      // Regionalzüge kleiner, erst nah herangezoomt in voller Größe
+      if (big && (!regional || this.zoom >= 3.5)) this.rect(buf, Math.round(x - 0.5), Math.round(y - 0.5), 2, 2, col.head);
       else this.set(buf, x, y, col.head);
-      if (s.known) {
+      if ((regional && s.delay < 16) || dim) {
+        // nur deutliche Verspätungen leuchten, im Fokus nur der gewählte Zug
+      } else if (s.known) {
         this.set(glow, x, y, col.head);
         if (s.delay >= 31) this.rect(glow, Math.round(x) - 1, Math.round(y) - 1, 3, 3, col.head);
       }
       this.lastTrains.push({ x, y, trip: s.trip });
-      if (s.trip === f.selected.train) {
-        const c = blink ? C.select : col.head;
-        const rx = Math.round(x), ry = Math.round(y);
-        for (let i = -3; i <= 3; i++) {
-          if (Math.abs(i) < 2) continue;
-          this.set(buf, rx + i, ry - 4, c); this.set(buf, rx + i, ry + 4, c);
-          this.set(buf, rx - 4, ry + i, c); this.set(buf, rx + 4, ry + i, c);
-        }
-        this.ring(glow, rx, ry, 5, C.select);
-      }
+    }
+    // Gewählter Zug: Namensschild mit Linie und Verspätung, ruhiger Puls statt Blinken
+    if (selState) {
+      const T = m.trips[selState.trip];
+      const a = T.stops[selState.stop], b = T.stops[Math.min(selState.stop + 1, T.stops.length - 1)];
+      const x = Math.round(xy[a * 2] + (xy[b * 2] - xy[a * 2]) * selState.progress);
+      const y = Math.round(xy[a * 2 + 1] + (xy[b * 2 + 1] - xy[a * 2 + 1]) * selState.progress);
+      const col = selState.known ? TRAIN_PX.find((c) => selState.delay < c.max)! : TRAIN_UNKNOWN;
+      const phase = (f.now / 2000) % 1;
+      this.ring(glow, x, y, 3 + phase * 9, col.head);
+      this.rect(buf, x - 3, y - 3, 7, 7, C.labelShadow);
+      this.rect(buf, x - 2, y - 2, 5, 5, C.select);
+      this.rect(buf, x - 1, y - 1, 3, 3, col.head);
+      this.rect(glow, x - 2, y - 2, 5, 5, col.head);
+      const delay = selState.known && Math.round(selState.delay) >= 1 ? ` +${Math.round(selState.delay)}` : '';
+      const text = `${T.line}${delay}`;
+      const tw = textWidth(text);
+      const bw = tw + 5, bh = 9;
+      const above = y - 7 - bh > 2;
+      const bx = Math.max(1, Math.min(this.w - bw - 1, x - (bw >> 1)));
+      const by = above ? y - 6 - bh : y + 6;
+      this.rect(buf, bx - 1, by - 1, bw + 2, bh + 2, C.labelShadow);
+      this.rect(buf, bx, by, bw, bh, col.head);
+      this.rect(buf, x, above ? by + bh + 1 : y + 3, 1, 2, col.head);
+      drawText(buf, this.w, this.h, bx + 3, by + 2, text, C.tagText);
     }
     if (f.selected.station !== undefined) {
       const x = xy[f.selected.station * 2], y = xy[f.selected.station * 2 + 1];
-      this.ring(buf, x, y, 5, blink ? C.select : C.route);
+      this.ring(buf, x, y, 5, C.select);
       this.ring(glow, x, y, 5, C.route);
+    }
+    if (f.user) {
+      const [x, y] = this.project(f.user.lon, f.user.lat);
+      const phase = (f.now / 1600) % 1;
+      this.ring(buf, x, y, 2 + phase * 7, C.userRing);
+      this.ring(glow, x, y, 2 + phase * 7, C.userRing);
+      this.rect(buf, Math.round(x) - 1, Math.round(y) - 1, 3, 3, C.select);
+      this.rect(buf, Math.round(x), Math.round(y), 1, 1, C.user);
+      this.rect(glow, Math.round(x) - 1, Math.round(y) - 1, 3, 3, C.user);
+      drawText(buf, this.w, this.h, Math.round(x) + 5, Math.round(y) - 2, 'DU', C.user, C.labelShadow);
     }
     this.ctx.putImageData(this.image, 0, 0);
     this.glowCtx.putImageData(this.glowImage, 0, 0);
@@ -515,8 +617,8 @@ export class PixelMap {
     if (best) return best;
     bestD = this.pixelSize === 2 ? 7 : 5;
     const st = this.model.stations;
-    for (let i = 0; i < st.length; i++) {
-      if (st[i].weight < 20) continue;
+    for (const i of this.usedStations) {
+      if (st[i].weight < 20 && this.zoom < 2.5) continue;
       const d = Math.hypot(this.stationXY[i * 2] - mx, this.stationXY[i * 2 + 1] - my);
       if (d < bestD) { bestD = d; best = { type: 'station', id: i }; }
     }
@@ -529,13 +631,13 @@ export class PixelMap {
   }
 
   /** Bringt einen Punkt in den sichtbaren Bereich; `bottomCss` = aktuell vom Sheet verdeckte Höhe. */
-  ensureVisible(lon: number, lat: number, bottomCss: number, minZoom = 1) {
+  ensureVisible(lon: number, lat: number, bottomCss: number, minZoom = 1, center = false) {
     if (this.zoom < minZoom) this.zoom = minZoom;
     const s = this.w / (this.canvas.getBoundingClientRect().width || 1);
     const top = this.insets.top * s, bottom = bottomCss * s;
     const [x, y] = this.project(lon, lat);
     const margin = 16;
-    if (x > margin && x < this.w - margin && y > top + margin && y < this.h - bottom - margin) {
+    if (!center && x > margin && x < this.w - margin && y > top + margin && y < this.h - bottom - margin) {
       this.dirty = true;
       return;
     }
