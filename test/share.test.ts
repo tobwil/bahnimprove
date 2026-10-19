@@ -50,6 +50,8 @@ describe('Live mitfahren', () => {
     expect(cleanName('<b>Tobi</b>')).toBe('bTobib');
     expect(cleanName('Anne-Marie Müller und sehr lange Namen')).toHaveLength(20);
     expect(cleanName(null)).toBe('');
+    // Von einem Messenger an den Link gehängter Text
+    expect(cleanName('Tobi Ich sitze im ICE 25 nach München. Hier siehst du')).toBe('Tobi');
   });
 
   it('erzeugt eine gültige PNG-Vorschaukarte', () => {

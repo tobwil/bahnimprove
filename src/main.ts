@@ -539,6 +539,8 @@ async function main() {
     if (name) url.searchParams.set('von', name);
     const tile = trip >= n.fvCount ? state.day.regional.tileOf(trip - n.fvCount) : undefined;
     if (tile) url.searchParams.set('k', tile);
+    // Abschluss: hängt ein Messenger Text an den Link, landet er hier statt im Namen
+    url.searchParams.set('v', '1');
     return url.toString();
   }
   async function doShare(copyOnly: boolean) {
@@ -555,7 +557,17 @@ async function main() {
     const url = shareLink(shareTrip, target, name);
     const text = `Ich sitze im ${T.line} nach ${shortName(m.stations[T.stops[target]].name)}. Hier siehst du live, wo der Zug gerade ist und wann ich ankomme:`;
     const result = $('share-result');
-    if (!copyOnly && navigator.share) {
+    // Kopieren: nur der Link, damit er sich überall einfügen lässt (auch in die Adresszeile)
+    if (copyOnly) {
+      try {
+        await navigator.clipboard.writeText(url);
+        result.textContent = 'Link kopiert.';
+      } catch {
+        result.innerHTML = `Diesen Link teilen: <input class="share-url" readonly value="${esc(url)}" onclick="this.select()" />`;
+      }
+      return;
+    }
+    if (navigator.share) {
       try {
         await navigator.share({ title: `${T.line} live mitfahren`, text, url });
         result.textContent = 'Geteilt. Der Link zeigt die Fahrt bis zur Ankunft live.';
@@ -564,9 +576,10 @@ async function main() {
         if ((e as Error).name === 'AbortError') return;
       }
     }
+    // Kein Teilen-Menü (z. B. Desktop-Browser): Nachricht mit Link kopieren, WhatsApp anbieten
     try {
-      await navigator.clipboard.writeText(`${text} ${url}`);
-      result.innerHTML = `Link kopiert, jetzt einfach im Chat einfügen. <a href="https://wa.me/?text=${encodeURIComponent(`${text} ${url}`)}" target="_blank" rel="noopener">Per WhatsApp senden</a>`;
+      await navigator.clipboard.writeText(`${text}\n${url}`);
+      result.innerHTML = `Nachricht mit Link kopiert, jetzt im Chat einfügen. <a href="https://wa.me/?text=${encodeURIComponent(`${text}\n${url}`)}" target="_blank" rel="noopener">Per WhatsApp senden</a>`;
     } catch {
       result.innerHTML = `Diesen Link teilen: <input class="share-url" readonly value="${esc(url)}" onclick="this.select()" />`;
     }
@@ -608,6 +621,8 @@ async function main() {
     const m = net().model;
     const T = m.trips[trip];
     state.follow = { trip, target: targetIndexOf(m.stations, T, params.get('bis')), name: cleanName(params.get('von')) };
+    // Adresszeile aufräumen (angehängter Text aus Messengern fällt weg)
+    history.replaceState(null, '', shareLink(trip, state.follow.target, state.follow.name));
     if (!state.live) state.time = Math.min(net().result.trips[trip].arr[state.follow.target] + 1, 1440 + DAY_ROLLOVER);
     syncControls();
     followCamera = true;

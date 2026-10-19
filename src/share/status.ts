@@ -97,5 +97,7 @@ export function followHeadline(st: FollowStatus, who?: string): string {
 
 /** Namen aus Links: nur Buchstaben, Leerzeichen und Bindestrich, höchstens 20 Zeichen. */
 export function cleanName(raw: string | null | undefined): string {
-  return (raw ?? '').replace(/[^\p{L} \-]/gu, '').replace(/\s+/g, ' ').trim().slice(0, 20);
+  // Ältere Links ohne Abschluss: von Messengern angehängter Text beginnt mit "Ich sitze"
+  const name = (raw ?? '').split(/\s+Ich sitze/i)[0];
+  return name.replace(/[^\p{L} \-]/gu, '').replace(/\s+/g, ' ').trim().slice(0, 20).trim();
 }
