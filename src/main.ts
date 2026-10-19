@@ -1073,10 +1073,35 @@ async function main() {
     openInsights();
     void loadInsights().then(() => !overlay.hidden && insights && ($('report-body').innerHTML = insightsPage(insights, lineInfo)));
   } else if (location.hash === '#abfahrten') selectTab('board');
+  watchHostBadge(layoutMap);
   layoutMap();
   syncControls();
   renderPanels(netTrains());
   requestAnimationFrame(loop);
+}
+
+/**
+ * Der Hoster blendet im Gratis-Tarif unten rechts ein Badge ein, das sich nicht ausblenden lässt.
+ * Statt es zu verdecken, bekommt es Platz: --host-badge schiebt die App-Navigation darüber.
+ */
+function watchHostBadge(onChange: () => void) {
+  let current = -1;
+  const measure = () => {
+    const f = document.getElementById('nl-badge-frame');
+    const h = f ? Math.round(f.getBoundingClientRect().height) : 0;
+    // Aufgeklappt (Popover) ist das Badge nur kurz größer – dann die bisherige Höhe behalten
+    if (h > 100 || h === current) return;
+    current = h;
+    document.documentElement.style.setProperty('--host-badge', `${h}px`);
+    onChange();
+  };
+  const ro = new ResizeObserver(measure);
+  new MutationObserver(() => {
+    const f = document.getElementById('nl-badge-frame');
+    if (f) ro.observe(f);
+    measure();
+  }).observe(document.body, { childList: true });
+  measure();
 }
 
 main().catch((err) => {
