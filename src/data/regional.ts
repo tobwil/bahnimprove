@@ -46,4 +46,6 @@ export interface RegionalIndex {
   dates: string[];
   /** Kachel → Fahrten je Tag */
   tiles: Record<string, number[]>;
+  /** Linie ("re19") → Kacheln, in denen ihre Fahrten beginnen – damit die Suche sie überall findet */
+  lines?: Record<string, string[]>;
 }

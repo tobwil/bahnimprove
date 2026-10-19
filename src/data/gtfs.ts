@@ -5,6 +5,7 @@
  * Läuft lokal (scripts/build-timetable.ts) und nachts auf dem Server (Netlify Function).
  */
 import { strFromU8, unzipSync } from 'fflate';
+import { lineKey } from '../sim/search.ts';
 import type { Timetable, TimetableStation, TimetableTrip } from '../sim/types.ts';
 import { tileKey, type RegionalIndex, type RegionalTile, type RegionalTrip } from './regional.ts';
 
@@ -271,6 +272,7 @@ export function buildStatic(fv: Feed, rv: Feed | null, opts: { start: string; fv
     const tiles = new Map<string, RegionalTile>();
     const tripTiles: Record<string, string[]> = {};
     const counts: Record<string, number[]> = {};
+    const lines: Record<string, Set<string>> = {};
     for (const [tripId, trip] of rvData.trips) {
       const list = rvData.stopTimes.get(tripId);
       if (!list || list.length < 2) continue;
@@ -279,6 +281,7 @@ export function buildStatic(fv: Feed, rv: Feed | null, opts: { start: string; fv
       const s = merged.map((x) => station(x.stop));
       const keys = [...new Set(s.map((i) => tileKey(stations[i].lat, stations[i].lon)))];
       tripTiles[tripId] = keys;
+      (lines[lineKey(route.name || 'Zug')] ??= new Set()).add(keys[0]);
       const seqs = merged.map((x) => x.seq);
       const base: Omit<RegionalTrip, 'op'> = {
         id: tripId,
@@ -302,7 +305,8 @@ export function buildStatic(fv: Feed, rv: Feed | null, opts: { start: string; fv
       });
     }
     rvData.stopTimes.clear();
-    regional = { index: { version, dates: rvDates, tiles: counts }, tiles, tripTiles };
+    const lineTiles = Object.fromEntries(Object.entries(lines).map(([k, v]) => [k, [...v]]));
+    regional = { index: { version, dates: rvDates, tiles: counts, lines: lineTiles }, tiles, tripTiles };
   }
 
   // w = Zughalte pro Tag (alle Züge); bedient ist bedient, auch mit einem Halt pro Woche

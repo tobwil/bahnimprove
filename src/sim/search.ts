@@ -31,7 +31,32 @@ export interface SearchResult {
 
 /** Linie oder Zugnummer: "ICE 28", "re4", "S 5", "28" */
 const LINE = /^([a-z]{1,4})?\s*(\d{1,5})$/;
-const lineKey = (line: string) => fold(line).replace(/\s/g, '');
+/** Linie als Schlüssel: "RE 19" → "re19" */
+export const lineKey = (line: string) => fold(line).replace(/\s/g, '');
+
+export interface LineQuery {
+  cat?: string;
+  no: string;
+  /** Wörter nach der Linie (Bahnhöfe) */
+  rest: string[];
+}
+
+/** Erkennt eine Linie oder Zugnummer am Anfang der Suche ("ICE 28", "RE 4", "S5", "28") */
+export function lineQuery(words: string[]): LineQuery | null {
+  for (const take of [2, 1]) {
+    const lm = LINE.exec(words.slice(0, take).join(' '));
+    if (lm && (take === 1 || /^\d/.test(words[1]))) return { cat: lm[1], no: lm[2], rest: words.slice(take) };
+  }
+  return null;
+}
+
+/** Passt ein Linienschlüssel zur Suche? Ohne Gattung zählt nur die Nummer am Ende ("28" ≠ "128") */
+export function lineMatches(key: string, q: { cat?: string; no: string }): boolean {
+  return q.cat ? key === `${q.cat}${q.no}` : key.endsWith(q.no) && !/\d/.test(key.slice(-q.no.length - 1, -q.no.length));
+}
+
+/** Suchwörter ohne Füllwörter */
+export const searchWords = (query: string) => fold(query.replace(/→|->/g, ' ')).split(' ').filter((w) => w && w !== 'nach' && w !== 'von' && w !== 'bis');
 
 /** Bahnhöfe, deren Name alle Suchwörter enthält – wichtigste zuerst, Wortanfänge bevorzugt. */
 export function matchStations(m: DayModel, query: string | string[], limit = 6): number[] {
@@ -50,22 +75,11 @@ export function matchStations(m: DayModel, query: string | string[], limit = 6):
 }
 
 export function search(m: DayModel, r: SimResult, query: string, now: number): SearchResult {
-  const q = fold(query.replace(/→|->/g, ' '));
-  if (!q) return { stations: [], trips: [] };
-  const words = q.split(' ').filter((w) => w !== 'nach' && w !== 'von' && w !== 'bis');
-
-  // Linie oder Zugnummer ("ICE 28", "RE 4", "S5", "28") – nur wenn das Wort kein Bahnhof sein soll
-  let lineCat: string | undefined, lineNo: string | undefined;
-  let rest = words;
-  for (const take of [2, 1]) {
-    const lm = LINE.exec(words.slice(0, take).join(' '));
-    if (lm && (take === 1 || /^\d/.test(words[1]))) {
-      lineCat = lm[1];
-      lineNo = lm[2];
-      rest = words.slice(take);
-      break;
-    }
-  }
+  if (!fold(query)) return { stations: [], trips: [] };
+  const words = searchWords(query);
+  // Linie oder Zugnummer – nur wenn das Wort kein Bahnhof sein soll
+  const line = lineQuery(words);
+  const rest = line ? line.rest : words;
 
   // Restliche Wörter als Bahnhöfe (mehrteilige Namen werden zusammengefasst)
   const stationSets: number[][] = [];
@@ -84,10 +98,7 @@ export function search(m: DayModel, r: SimResult, query: string, now: number): S
 
   const trips: TripHit[] = [];
   for (const T of m.trips) {
-    if (lineNo) {
-      const key = lineKey(T.line);
-      if (lineCat ? key !== `${lineCat}${lineNo}` : !key.endsWith(lineNo) || /\d/.test(key.slice(-lineNo.length - 1, -lineNo.length))) continue;
-    }
+    if (line && !lineMatches(lineKey(T.line), line)) continue;
     // Bahnhöfe in Fahrtrichtung
     let stop = 0;
     let ok = true;
@@ -107,7 +118,7 @@ export function search(m: DayModel, r: SimResult, query: string, now: number): S
       if (first < 0) first = found;
       stop = found + 1;
     }
-    if (!ok || (!lineNo && !stationSets.length)) continue;
+    if (!ok || (!line && !stationSets.length)) continue;
     const R = r.trips[T.id];
     const status: TripStatus = R.canceled || R.arr[T.stops.length - 1] < now ? 'done' : R.dep[0] > now ? 'upcoming' : 'running';
     const s = Math.max(0, first);
@@ -121,7 +132,7 @@ export function search(m: DayModel, r: SimResult, query: string, now: number): S
     return a.status === 'done' ? b.time - a.time : a.time - b.time;
   });
   // Bei einer Bahnhofssuche zuerst die nächsten Abfahrten dort
-  if (stationSets.length === 1 && !lineNo) {
+  if (stationSets.length === 1 && !line) {
     trips.sort((a, b) => {
       const fa = a.time >= now - 2, fb = b.time >= now - 2;
       return fa !== fb ? (fa ? -1 : 1) : fa ? a.time - b.time : b.time - a.time;
