@@ -1290,7 +1290,8 @@ async function main() {
   else if (/\/datenschutz\/?$/.test(location.pathname) || location.hash === '#datenschutz') openPrivacy();
   else if (/\/impressum\/?$/.test(location.pathname) || location.hash === '#impressum') openImprint();
   const followLink = location.pathname.match(/^\/zug\/(\d{8})\/([^/]+)\/?$/);
-  if (followLink) void startFollow(followLink[1], decodeURIComponent(followLink[2]), new URLSearchParams(location.search));
+  // Angehängter Text aus Messengern ("/zug/…/913549 Ich sitze …") gehört nicht zur Zug-ID
+  if (followLink) void startFollow(followLink[1], decodeURIComponent(followLink[2]).split(/\s/)[0], new URLSearchParams(location.search));
   watchHostBadge(layoutMap);
   layoutMap();
   syncControls();

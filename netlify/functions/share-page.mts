@@ -11,10 +11,11 @@ const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&l
 export default async (req: Request) => {
   const url = new URL(req.url);
   const html = await (await fetch(new URL('/index.html', url))).text();
-  const m = url.pathname.match(/^\/zug\/(\d{8})\/([^/]{1,80})\/?$/);
+  const m = url.pathname.match(/^\/zug\/(\d{8})\/([^/]+)\/?$/);
   if (!m) return new Response(html, { headers: { 'Content-Type': 'text/html; charset=utf-8' } });
   const [, date, rawId] = m;
-  const id = decodeURIComponent(rawId);
+  // Angehängter Text aus Messengern gehört nicht zur Zug-ID
+  const id = decodeURIComponent(rawId).split(/\s/)[0].slice(0, 80);
   const who = cleanName(url.searchParams.get('von'));
   let title = 'Share my Train';
   let description = 'Wo der Zug gerade ist und wann er ankommt, live aus den Echtzeitdaten.';
