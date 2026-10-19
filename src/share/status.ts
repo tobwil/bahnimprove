@@ -11,13 +11,38 @@ import type { SimResult, TimetableStation, Trip, TripResult } from '../sim/types
 export const PAIN_MIN = 15;
 export const isPain = (delay: number, canceled = false) => canceled || delay >= PAIN_MIN;
 
+/**
+ * Treibhausgase je Personenkilometer in g CO₂e, Umweltbundesamt, TREMOD 6.71B, Bezugsjahr 2024
+ * (inkl. Vorkette; Pkw bei durchschnittlich 1,4 Personen).
+ */
+export const CO2_G_PKM = { car: 164, longDistance: 26, regional: 44 } as const;
+const LONG_DISTANCE = new Set(['ICE', 'IC', 'EC', 'ECE', 'EN', 'NJ', 'RJ', 'RJX', 'TGV', 'FLX', 'ES']);
+
+/** Luftlinie zwischen aufeinanderfolgenden Halten, aufsummiert (eher zu wenig als zu viel) */
+function routeKm(stations: TimetableStation[], stops: number[], from: number, to: number): number {
+  let km = 0;
+  for (let i = from; i < to; i++) {
+    const a = stations[stops[i]], b = stations[stops[i + 1]];
+    const dy = (b.lat - a.lat) * 111.2, dx = (b.lon - a.lon) * 111.2 * Math.cos((((a.lat + b.lat) / 2) * Math.PI) / 180);
+    km += Math.hypot(dx, dy);
+  }
+  return km;
+}
+
+/** Gesparte kg CO₂e pro Person gegenüber dem Auto auf dieser Strecke */
+export function co2SavedKg(category: string, km: number): number {
+  const train = LONG_DISTANCE.has(category) ? CO2_G_PKM.longDistance : CO2_G_PKM.regional;
+  return ((CO2_G_PKM.car - train) * km) / 1000;
+}
+
 export type FollowState = 'before' | 'running' | 'arrived' | 'canceled';
 
 export interface FollowStatus {
   line: string;
   from: string;
   to: string;
-  /** Ausstieg */
+  /** Einstieg und Ausstieg */
+  board: string;
   target: string;
   targetIndex: number;
   state: FollowState;
@@ -33,6 +58,9 @@ export interface FollowStatus {
   progress: number;
   minutesLeft: number;
   next?: { name: string; time: number };
+  /** Strecke vom Ein- bis zum Ausstieg und dabei gegenüber dem Auto gesparte kg CO₂e pro Person */
+  km: number;
+  co2Kg: number;
 }
 
 /** Halt-Index eines Bahnhofs (nach Name) auf der Fahrt; sonst Endhalt. */
@@ -44,9 +72,18 @@ export function targetIndexOf(stations: TimetableStation[], T: Trip, name: strin
   return T.stops.length - 1;
 }
 
-export function followStatus(stations: TimetableStation[], T: Trip, R: TripResult, targetIndex: number, now: number): FollowStatus {
+/** Halt-Index des Einstiegs (nach Name); sonst Start der Fahrt. */
+export function boardIndexOf(stations: TimetableStation[], T: Trip, name: string | null | undefined): number {
+  if (!name) return 0;
+  const i = T.stops.findIndex((s, k) => k < T.stops.length - 1 && stations[s].name === name);
+  return Math.max(0, i);
+}
+
+export function followStatus(stations: TimetableStation[], T: Trip, R: TripResult, targetIndex: number, now: number, boardIndex = 0): FollowStatus {
   const n = T.stops.length;
   const ti = Math.min(n - 1, Math.max(1, targetIndex));
+  const bi = Math.min(ti - 1, Math.max(0, boardIndex));
+  const km = routeKm(stations, T.stops, bi, ti);
   const name = (i: number) => shortName(stations[T.stops[i]].name);
   const known = R.known !== false;
   const schedArr = T.schedArr[ti];
@@ -64,8 +101,9 @@ export function followStatus(stations: TimetableStation[], T: Trip, R: TripResul
           : s.atStation
             ? `in ${name(s.stop)}`
             : `zwischen ${name(s.stop)} und ${name(s.stop + 1)}`;
-  const span = Math.max(1, estArr - R.dep[0]);
-  const progress = state === 'arrived' ? 1 : Math.min(1, Math.max(0, (now - R.dep[0]) / span));
+  // Fortschritt ab dem Einstieg
+  const span = Math.max(1, estArr - R.dep[bi]);
+  const progress = state === 'arrived' ? 1 : Math.min(1, Math.max(0, (now - R.dep[bi]) / span));
   let next: FollowStatus['next'];
   for (let i = 1; i <= ti; i++) {
     if (R.arr[i] > now) {
@@ -77,6 +115,7 @@ export function followStatus(stations: TimetableStation[], T: Trip, R: TripResul
     line: T.line,
     from: name(0),
     to: name(n - 1),
+    board: name(bi),
     target: name(ti),
     targetIndex: ti,
     state,
@@ -88,6 +127,8 @@ export function followStatus(stations: TimetableStation[], T: Trip, R: TripResul
     progress,
     minutesLeft: Math.max(0, Math.round(estArr - now)),
     next,
+    km,
+    co2Kg: co2SavedKg(T.category, km),
   };
 }
 
@@ -97,6 +138,14 @@ export function followHeadline(st: FollowStatus, who?: string): string {
   if (st.state === 'canceled') return `${st.line} nach ${st.to} fällt aus`;
   if (st.state === 'arrived') return `${subject} ist in ${st.target} angekommen (${hhmm(st.estArr)})`;
   return `${subject} kommt um ${hhmm(st.estArr)} in ${st.target} an${st.delay >= 1 ? ` (+${st.delay} Min)` : ''}`;
+}
+
+/** Positive Zeile zum CO₂: bei großer Verspätung mit Augenzwinkern */
+export function co2Line(st: FollowStatus): string {
+  const kg = Math.round(st.co2Kg);
+  if (kg < 1) return '';
+  const what = `rund ${kg} kg CO₂ weniger als mit dem Auto (${st.board}–${st.target}, pro Person)`;
+  return isPain(st.delay, st.state === 'canceled') ? `Pain is temporary, CO₂ reduction is forever: ${what}.` : `Gute Wahl: ${what}.`;
 }
 
 /** Namen aus Links: nur Buchstaben, Leerzeichen und Bindestrich, höchstens 20 Zeichen. */

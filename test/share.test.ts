@@ -3,7 +3,7 @@ import { deflateSync, inflateSync } from 'node:zlib';
 import { describe, expect, it } from 'vitest';
 import { CARD_H, CARD_W, renderCard, upscale } from '../src/share/card.ts';
 import { encodePng } from '../src/share/png.ts';
-import { PAIN_MIN, cleanName, followHeadline, followStatus, isPain, targetIndexOf } from '../src/share/status.ts';
+import { CO2_G_PKM, PAIN_MIN, boardIndexOf, cleanName, co2Line, co2SavedKg, followHeadline, followStatus, isPain, targetIndexOf } from '../src/share/status.ts';
 import { shareBrand } from '../src/ui/views.ts';
 import { defaultPolicy, simulate } from '../src/sim/engine.ts';
 import { buildDayModel } from '../src/sim/model.ts';
@@ -54,6 +54,18 @@ describe('Live mitfahren', () => {
     expect(shareBrand(false)).not.toContain('Pain');
     expect(shareBrand(true)).toContain('<s>Train</s>');
     expect(shareBrand(true)).toContain('Pain');
+  });
+
+  it('rechnet die CO₂-Ersparnis gegenüber dem Auto (UBA 2024)', () => {
+    expect(co2SavedKg('ICE', 600)).toBeCloseTo(((CO2_G_PKM.car - CO2_G_PKM.longDistance) * 600) / 1000);
+    expect(co2SavedKg('RE', 100)).toBeCloseTo(((CO2_G_PKM.car - CO2_G_PKM.regional) * 100) / 1000);
+    const all = followStatus(m.stations, T, R, T.stops.length - 1, R.dep[0]);
+    const part = followStatus(m.stations, T, R, T.stops.length - 1, R.dep[0], 2);
+    expect(part.km).toBeLessThan(all.km);
+    expect(part.board).not.toBe(all.board);
+    expect(boardIndexOf(m.stations, T, m.stations[T.stops[2]].name)).toBe(2);
+    expect(co2Line(all)).toMatch(/kg CO₂ weniger als mit dem Auto/);
+    expect(co2Line({ ...all, delay: PAIN_MIN })).toMatch(/^Pain is temporary, CO₂ reduction is forever/);
   });
 
   it('lässt im Namen nur Buchstaben zu', () => {

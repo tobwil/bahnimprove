@@ -3,7 +3,7 @@ import { deflateSync } from 'node:zlib';
 import { minuteOfServiceDay, tripWithRealtime } from '../realtime-store.mts';
 import { CARD_H, CARD_SCALE, CARD_W, renderCard, upscale } from '../../src/share/card.ts';
 import { encodePng } from '../../src/share/png.ts';
-import { cleanName, followStatus, targetIndexOf } from '../../src/share/status.ts';
+import { boardIndexOf, cleanName, followStatus, targetIndexOf } from '../../src/share/status.ts';
 
 /** GET /api/zugkarte?d=YYYYMMDD&t=GTFS-ID&bis=Bahnhof&von=Name&k=Kachel – Vorschaubild für geteilte Zugfahrten. */
 export default async (req: Request) => {
@@ -13,7 +13,7 @@ export default async (req: Request) => {
   const found = await tripWithRealtime(date, id, q.get('k') ?? undefined);
   if (!found) return new Response('Fahrt nicht gefunden', { status: 404 });
   const now = minuteOfServiceDay(date);
-  const st = followStatus(found.stations, found.trip, found.result, targetIndexOf(found.stations, found.trip, q.get('bis')), now);
+  const st = followStatus(found.stations, found.trip, found.result, targetIndexOf(found.stations, found.trip, q.get('bis')), now, boardIndexOf(found.stations, found.trip, q.get('ab')));
   const pixels = renderCard(st, { name: cleanName(q.get('von')), stamp: now });
   const png = encodePng(CARD_W * CARD_SCALE, CARD_H * CARD_SCALE, upscale(pixels, CARD_W, CARD_H, CARD_SCALE), (d) => deflateSync(d, { level: 9 }));
   return new Response(png, {

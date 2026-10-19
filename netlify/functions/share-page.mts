@@ -1,6 +1,6 @@
 import type { Config } from '@netlify/functions';
 import { minuteOfServiceDay, tripWithRealtime } from '../realtime-store.mts';
-import { cleanName, followHeadline, followStatus, isPain, targetIndexOf } from '../../src/share/status.ts';
+import { boardIndexOf, cleanName, followHeadline, followStatus, isPain, targetIndexOf } from '../../src/share/status.ts';
 
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
 
@@ -21,7 +21,7 @@ export default async (req: Request) => {
   try {
     const found = await tripWithRealtime(date, id, url.searchParams.get('k') ?? undefined);
     if (found) {
-      const st = followStatus(found.stations, found.trip, found.result, targetIndexOf(found.stations, found.trip, url.searchParams.get('bis')), minuteOfServiceDay(date));
+      const st = followStatus(found.stations, found.trip, found.result, targetIndexOf(found.stations, found.trip, url.searchParams.get('bis')), minuteOfServiceDay(date), boardIndexOf(found.stations, found.trip, url.searchParams.get('ab')));
       const pain = st.known && isPain(st.delay, st.state === 'canceled');
       title = `${pain ? 'Train Pain: ' : ''}${who ? `${who} im ` : ''}${st.line} nach ${st.target}${pain && st.state !== 'canceled' ? ` (+${st.delay} Min)` : ''}`;
       description = `${followHeadline(st, who || undefined)}. Live verfolgen: wo der Zug gerade ist.`;
@@ -32,7 +32,7 @@ export default async (req: Request) => {
   const img = new URL('/api/zugkarte', url);
   img.searchParams.set('d', date);
   img.searchParams.set('t', id);
-  for (const k of ['bis', 'von', 'k']) {
+  for (const k of ['ab', 'bis', 'von', 'k']) {
     const v = url.searchParams.get(k);
     if (v) img.searchParams.set(k, v);
   }

@@ -29,7 +29,7 @@ import { searchJourneys, type JourneyResult } from './sim/journey.ts';
 import { matchStations, search } from './sim/search.ts';
 import { insightsPage, insightsTeaser } from './ui/insights.ts';
 import { aboutPage } from './ui/about.ts';
-import { cleanName, followStatus, isPain, targetIndexOf } from './share/status.ts';
+import { boardIndexOf, cleanName, co2Line, followStatus, isPain, targetIndexOf } from './share/status.ts';
 
 /** Ab dieser Uhrzeit beginnt ein neuer Verkehrstag (Nachtzüge laufen über Mitternacht). */
 const DAY_ROLLOVER = 180;
@@ -150,7 +150,7 @@ async function main() {
     user: undefined as { lat: number; lon: number } | undefined,
     hotspots: [] as LiveHotspot[],
     /** Geteilte Zugfahrt, der diese Ansicht folgt (Empfänger eines Links) */
-    follow: undefined as { trip: number; target: number; name: string } | undefined,
+    follow: undefined as { trip: number; target: number; board: number; name: string } | undefined,
   };
   /** Karte folgt dem Zug, bis jemand selbst schiebt */
   let followCamera = false;
@@ -476,7 +476,7 @@ async function main() {
       const f = state.follow;
       $('follow-card').hidden = !f || f.trip !== id;
       $('sheet').classList.toggle('is-follow', !!f && f.trip === id);
-      if (f && f.trip === id) setHtml('follow-card', followCard(followStatus(m.stations, m.trips[id], r.trips[id], f.target, state.time), f.name, state.time), force);
+      if (f && f.trip === id) setHtml('follow-card', followCard(followStatus(m.stations, m.trips[id], r.trips[id], f.target, state.time, f.board), f.name, state.time), force);
     }
   }
   $('detail').addEventListener('click', (e) => {
@@ -535,13 +535,23 @@ async function main() {
     const pain = r.trips[trip].known !== false && isPain(Math.max(s?.delay ?? 0, r.trips[trip].arr[last] - T.schedArr[last]));
     box.innerHTML = sharePanel(m, trip, s ? s.stop : 0, savedName(), pain);
     box.hidden = false;
+    updateShareCo2();
     box.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
   }
-  /** Link zur geteilten Fahrt: Tag, Zug (GTFS), Ausstieg, Name und bei Regionalzügen die Kachel */
-  function shareLink(trip: number, target: number, name: string): string {
+  /** CO₂-Zeile im Formular passend zu Ein- und Ausstieg */
+  function updateShareCo2() {
+    if (shareTrip === undefined) return;
+    const { model: m, result: r } = net();
+    const st = followStatus(m.stations, m.trips[shareTrip], r.trips[shareTrip], +$<HTMLSelectElement>('share-to').value, state.time, +$<HTMLSelectElement>('share-from').value);
+    $('share-co2').textContent = co2Line(st);
+  }
+  $('share-box').addEventListener('change', updateShareCo2);
+  /** Link zur geteilten Fahrt: Tag, Zug (GTFS), Ein- und Ausstieg, Name und bei Regionalzügen die Kachel */
+  function shareLink(trip: number, target: number, name: string, board = 0): string {
     const n = net();
     const T = n.model.trips[trip];
     const url = new URL(`/zug/${state.day.date}/${encodeURIComponent(T.gtfsId)}`, location.origin);
+    if (board > 0) url.searchParams.set('ab', n.model.stations[T.stops[board]].name);
     url.searchParams.set('bis', n.model.stations[T.stops[target]].name);
     if (name) url.searchParams.set('von', name);
     const tile = trip >= n.fvCount ? state.day.regional.tileOf(trip - n.fvCount) : undefined;
@@ -559,15 +569,17 @@ async function main() {
       // ohne Speicher eben jedes Mal eintippen
     }
     const target = +$<HTMLSelectElement>('share-to').value;
+    const board = +$<HTMLSelectElement>('share-from').value;
     const { model: m, result: r } = net();
     const T = m.trips[shareTrip];
-    const url = shareLink(shareTrip, target, name);
-    const st = followStatus(m.stations, T, r.trips[shareTrip], target, state.time);
+    const url = shareLink(shareTrip, target, name, board);
+    const st = followStatus(m.stations, T, r.trips[shareTrip], target, state.time, board);
     const pain = st.known && isPain(st.delay);
     const to = shortName(m.stations[T.stops[target]].name);
+    const kg = Math.round(st.co2Kg);
     const text = pain
-      ? `Train Pain: Ich sitze im ${T.line} nach ${to}, gerade +${st.delay} Min. Hier siehst du live, wo der Zug ist und wann ich wirklich ankomme:`
-      : `Ich sitze im ${T.line} nach ${to}. Hier siehst du live, wo der Zug gerade ist und wann ich ankomme:`;
+      ? `Train Pain: Ich sitze im ${T.line} nach ${to}, gerade +${st.delay} Min. Aber: Pain is temporary, CO₂ reduction is forever${kg >= 1 ? ` (rund ${kg} kg weniger als mit dem Auto)` : ''}. Hier siehst du live, wo der Zug ist und wann ich wirklich ankomme:`
+      : `Ich sitze im ${T.line} nach ${to}${kg >= 1 ? ` und spare rund ${kg} kg CO₂ gegenüber dem Auto` : ''}. Hier siehst du live, wo der Zug gerade ist und wann ich ankomme:`;
     const result = $('share-result');
     // Kopieren: nur der Link, damit er sich überall einfügen lässt (auch in die Adresszeile)
     if (copyOnly) {
@@ -632,9 +644,9 @@ async function main() {
     if (trip < 0) return toast('Diese Zugfahrt wurde nicht gefunden. Vielleicht ist der Link von einem anderen Tag?');
     const m = net().model;
     const T = m.trips[trip];
-    state.follow = { trip, target: targetIndexOf(m.stations, T, params.get('bis')), name: cleanName(params.get('von')) };
+    state.follow = { trip, target: targetIndexOf(m.stations, T, params.get('bis')), board: boardIndexOf(m.stations, T, params.get('ab')), name: cleanName(params.get('von')) };
     // Adresszeile aufräumen (angehängter Text aus Messengern fällt weg)
-    history.replaceState(null, '', shareLink(trip, state.follow.target, state.follow.name));
+    history.replaceState(null, '', shareLink(trip, state.follow.target, state.follow.name, state.follow.board));
     if (!state.live) state.time = Math.min(net().result.trips[trip].arr[state.follow.target] + 1, 1440 + DAY_ROLLOVER);
     syncControls();
     followCamera = true;

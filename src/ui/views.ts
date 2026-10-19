@@ -5,7 +5,7 @@ import type { DayModel } from '../sim/model.ts';
 import { INCIDENT_LABEL, fmtDelay, hhmm, incidentPlace, shortName } from '../sim/text.ts';
 import type { Incident, SimResult } from '../sim/types.ts';
 import { OBS_ARR, OBS_DEP } from '../sim/real.ts';
-import { isPain, type FollowStatus } from '../share/status.ts';
+import { co2Line, isPain, type FollowStatus } from '../share/status.ts';
 import { delayColor, esc } from './dom.ts';
 
 export const lineBadge = (m: DayModel, trip: number) => {
@@ -353,6 +353,12 @@ export const shareBrand = (pain: boolean) =>
 /** Formular zum Teilen der eigenen Zugfahrt: Ausstieg wählen, Name optional. */
 export function sharePanel(m: DayModel, trip: number, fromStop: number, name: string, pain: boolean): string {
   const T = m.trips[trip];
+  // Eingestiegen: irgendwo bis zum aktuellen Halt
+  const boards = T.stops
+    .map((s, i) => ({ s, i }))
+    .filter(({ i }) => i <= fromStop && i < T.stops.length - 1)
+    .map(({ s, i }) => `<option value="${i}"${i === 0 ? ' selected' : ''}>${esc(m.stations[s].name)} · ${hhmm(T.schedDep[i])}</option>`)
+    .join('');
   const options = T.stops
     .map((s, i) => ({ s, i }))
     .filter(({ i }) => i > fromStop)
@@ -361,7 +367,11 @@ export function sharePanel(m: DayModel, trip: number, fromStop: number, name: st
   return `<section class="share-card">
     <h3 class="share-title">${shareBrand(pain)}</h3>
     <p class="fine">Schick deinen Liebsten einen Link: Sie sehen live, wo dein Zug gerade ist und wann du ankommst. Geteilt wird nur der Zug, nicht dein Standort.</p>
-    <label class="field"><span class="eyebrow">Ich steige aus in</span><select id="share-to">${options}</select></label>
+    <div class="share-route">
+      <label class="field"><span class="eyebrow">Eingestiegen in</span><select id="share-from">${boards}</select></label>
+      <label class="field"><span class="eyebrow">Ich steige aus in</span><select id="share-to">${options}</select></label>
+    </div>
+    <p class="share-co2" id="share-co2"></p>
     <label class="field"><span class="eyebrow">Dein Name (optional)</span><input id="share-name" type="text" maxlength="20" placeholder="z. B. Tobi" autocomplete="given-name" value="${esc(name)}" /></label>
     <div class="share-actions">
       <button class="cta cta--small" id="share-go">Link teilen</button>
@@ -397,8 +407,9 @@ export function followCard(st: FollowStatus, who: string, stamp: number): string
     <p class="follow-head">${head}</p>
     <p class="follow-delay">${delay}</p>
     <div class="follow-bar" role="img" aria-label="${Math.round(st.progress * 100)} % der Strecke geschafft"><span style="width:${pct}%"></span><i style="left:${pct}%"></i></div>
-    <div class="follow-ends"><span>${esc(st.from)}</span><span>${esc(st.target)}</span></div>
+    <div class="follow-ends"><span>${esc(st.board)}</span><span>${esc(st.target)}</span></div>
     <p class="follow-where">${st.state === 'running' || st.state === 'before' ? `${esc(st.where.charAt(0).toUpperCase() + st.where.slice(1))}${st.next && st.next.name !== st.target ? ` · nächster Halt ${esc(st.next.name)} ${hhmm(st.next.time)}` : ''} · noch ${left}` : esc(st.where.charAt(0).toUpperCase() + st.where.slice(1))}</p>
-    <p class="fine">Aktualisiert sich automatisch, Stand ${hhmm(stamp)}. Geteilt wurde nur der Zug, kein Standort.</p>
+    ${co2Line(st) ? `<p class="follow-co2">${esc(co2Line(st))}</p>` : ''}
+    <p class="fine">Aktualisiert sich automatisch, Stand ${hhmm(stamp)}. Geteilt wurde nur der Zug, kein Standort. CO₂-Werte: Umweltbundesamt, Bezugsjahr 2024.</p>
   </section>`;
 }

@@ -1823,6 +1823,28 @@ a.ghost-btn {
 }
 
 /* ---------- Share your Train (Pain) ---------- */
+.share-route {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.share-route select {
+  width: 100%;
+}
+
+.share-co2,
+.follow-co2 {
+  margin: 0;
+  color: var(--ok);
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.share-co2:empty {
+  display: none;
+}
+
 .brand b {
   color: var(--lamp);
 }

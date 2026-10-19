@@ -20,6 +20,7 @@ const C = {
   dim: px('#5d6789'),
   lamp: px('#ffc56b'),
   live: px('#ff4f6e'),
+  ok: px('#3ee08f'),
   badge: px('#e9eefc'),
   badgeText: px('#0c1121'),
 };
@@ -91,13 +92,17 @@ export function renderCard(st: FollowStatus, opts: { name?: string; stamp: numbe
   rect(buf, x1 - 2, y - 3, 5, 8, C.text);
   rect(buf, px0 - 3, y - 3, 7, 8, C.bg);
   rect(buf, px0 - 2, y - 2, 5, 6, st.known ? delayPx(st.delay) : C.muted);
-  text(buf, x0 - 2, y + 7, fit(st.from, 120, 1), C.dim);
+  text(buf, x0 - 2, y + 7, fit(st.board, 120, 1), C.dim);
   text(buf, x1 + 2 - textWidth(st.target), y + 7, st.target, C.muted);
 
   // Wo gerade
   const now = textWidth(`JETZT: ${st.where}`) * 2 <= CARD_W - 20 ? `JETZT: ${st.where}` : st.where;
   text(buf, 10, 126, fit(now, CARD_W - 20, 2), C.muted, 2);
-  text(buf, 10, CARD_H - 11, `STAND ${hhmm(opts.stamp)} - LINK ZEIGT DIE FAHRT LIVE`, C.dim);
+  const kg = Math.round(st.co2Kg);
+  if (kg >= 1) {
+    const co2 = pain ? `PAIN IS TEMPORARY - CO2 REDUCTION IS FOREVER (${kg} KG)` : `${kg} KG CO2 WENIGER ALS MIT DEM AUTO`;
+    text(buf, 10, CARD_H - 11, co2, C.ok);
+  } else text(buf, 10, CARD_H - 11, `STAND ${hhmm(opts.stamp)} - LINK ZEIGT DIE FAHRT LIVE`, C.dim);
   text(buf, CARD_W - 10 - textWidth('BAHNIMPROVE'), CARD_H - 11, 'BAHNIMPROVE', C.lamp);
   return buf;
 }
