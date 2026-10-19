@@ -1822,7 +1822,45 @@ a.ghost-btn {
   background: color-mix(in srgb, var(--lamp) 10%, transparent);
 }
 
-/* ---------- Live mitfahren ---------- */
+/* ---------- Share your Train (Pain) ---------- */
+.brand b {
+  color: var(--lamp);
+}
+
+.brand.is-pain s {
+  color: var(--dim);
+  text-decoration-color: var(--bad);
+  text-decoration-thickness: 2px;
+}
+
+.brand.is-pain b {
+  color: var(--bad);
+}
+
+.ghost-btn--accent .brand {
+  color: var(--text);
+}
+
+.follow-brand {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-family: var(--f-display);
+  font-size: 18px;
+}
+
+.follow-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--f-micro);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
 .share-card {
   display: grid;
   gap: 10px;

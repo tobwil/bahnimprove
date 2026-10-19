@@ -5,7 +5,7 @@
 import { DELAY_COLORS, px } from '../ui/map.ts';
 import { drawText, textWidth } from '../ui/font.ts';
 import { hhmm } from '../sim/text.ts';
-import type { FollowStatus } from './status.ts';
+import { isPain, type FollowStatus } from './status.ts';
 
 export const CARD_W = 300;
 export const CARD_H = 158;
@@ -48,12 +48,20 @@ function fit(s: string, maxW: number, scale: number): string {
 
 export function renderCard(st: FollowStatus, opts: { name?: string; stamp: number }): Uint32Array {
   const buf = new Uint32Array(CARD_W * CARD_H).fill(C.bg);
-  // Kopf
-  text(buf, 10, 8, 'BAHNIMPROVE', C.lamp);
-  const live = 'LIVE MITFAHREN';
-  rect(buf, CARD_W - 10 - textWidth(live) - 7, 8, 4, 5, C.live);
-  text(buf, CARD_W - 10 - textWidth(live), 8, live, C.muted);
-  rect(buf, 10, 18, CARD_W - 20, 1, C.line);
+  // Kopf: "SHARE YOUR TRAIN" – bei großer Verspätung "SHARE YOUR T̶R̶A̶I̶N̶ PAIN"
+  const pain = isPain(st.delay, st.state === 'canceled');
+  let bx = 10;
+  text(buf, bx, 5, 'SHARE YOUR', C.muted, 2);
+  bx += (textWidth('SHARE YOUR ') + 1) * 2;
+  text(buf, bx, 5, 'TRAIN', pain ? C.dim : C.lamp, 2);
+  if (pain) {
+    rect(buf, bx - 2, 9, (textWidth('TRAIN') + 2) * 2, 2, C.live);
+    text(buf, bx + (textWidth('TRAIN ') + 1) * 2, 5, 'PAIN', C.live, 2);
+  }
+  const live = 'LIVE';
+  rect(buf, CARD_W - 10 - textWidth(live) * 2 - 8, 7, 4, 6, C.live);
+  text(buf, CARD_W - 10 - textWidth(live) * 2, 5, live, C.muted, 2);
+  rect(buf, 10, 19, CARD_W - 20, 1, C.line);
 
   // Linie und Verspätung groß
   const lineW = textWidth(st.line) * 4;
@@ -68,7 +76,7 @@ export function renderCard(st: FollowStatus, opts: { name?: string; stamp: numbe
 
   // Wer, wohin, wann
   const who = opts.name ? `${opts.name} ` : '';
-  const head = st.state === 'arrived' ? `${who}IST IN ${st.target} ANGEKOMMEN` : `${who}FÄHRT NACH ${st.target}`;
+  const head = st.state === 'arrived' ? `${who}IST IN ${st.target} ANGEKOMMEN` : `${who}REIST NACH ${st.target}`;
   text(buf, 10, 64, fit(head, CARD_W - 20, 2), C.text, 2);
   const when =
     st.state === 'canceled' ? 'ZUG FÄLLT AUS' : st.state === 'arrived' ? `ANKUNFT ${hhmm(st.estArr)}` : `ANKUNFT ${hhmm(st.estArr)}${st.delay >= 1 ? ` STATT ${hhmm(st.schedArr)}` : ''}`;
@@ -90,6 +98,7 @@ export function renderCard(st: FollowStatus, opts: { name?: string; stamp: numbe
   const now = textWidth(`JETZT: ${st.where}`) * 2 <= CARD_W - 20 ? `JETZT: ${st.where}` : st.where;
   text(buf, 10, 126, fit(now, CARD_W - 20, 2), C.muted, 2);
   text(buf, 10, CARD_H - 11, `STAND ${hhmm(opts.stamp)} - LINK ZEIGT DIE FAHRT LIVE`, C.dim);
+  text(buf, CARD_W - 10 - textWidth('BAHNIMPROVE'), CARD_H - 11, 'BAHNIMPROVE', C.lamp);
   return buf;
 }
 

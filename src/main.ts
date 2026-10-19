@@ -29,7 +29,7 @@ import { searchJourneys, type JourneyResult } from './sim/journey.ts';
 import { matchStations, search } from './sim/search.ts';
 import { insightsPage, insightsTeaser } from './ui/insights.ts';
 import { aboutPage } from './ui/about.ts';
-import { cleanName, followStatus, targetIndexOf } from './share/status.ts';
+import { cleanName, followStatus, isPain, targetIndexOf } from './share/status.ts';
 
 /** Ab dieser Uhrzeit beginnt ein neuer Verkehrstag (Nachtzüge laufen über Mitternacht). */
 const DAY_ROLLOVER = 180;
@@ -526,7 +526,10 @@ async function main() {
     shareTrip = trip;
     const { model: m, result: r } = net();
     const s = trainAt(m, r, trip, state.time);
-    box.innerHTML = sharePanel(m, trip, s ? s.stop : 0, savedName());
+    const T = m.trips[trip];
+    const last = T.stops.length - 1;
+    const pain = r.trips[trip].known !== false && isPain(Math.max(s?.delay ?? 0, r.trips[trip].arr[last] - T.schedArr[last]));
+    box.innerHTML = sharePanel(m, trip, s ? s.stop : 0, savedName(), pain);
     box.hidden = false;
     box.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
   }
@@ -552,10 +555,15 @@ async function main() {
       // ohne Speicher eben jedes Mal eintippen
     }
     const target = +$<HTMLSelectElement>('share-to').value;
-    const m = net().model;
+    const { model: m, result: r } = net();
     const T = m.trips[shareTrip];
     const url = shareLink(shareTrip, target, name);
-    const text = `Ich sitze im ${T.line} nach ${shortName(m.stations[T.stops[target]].name)}. Hier siehst du live, wo der Zug gerade ist und wann ich ankomme:`;
+    const st = followStatus(m.stations, T, r.trips[shareTrip], target, state.time);
+    const pain = st.known && isPain(st.delay);
+    const to = shortName(m.stations[T.stops[target]].name);
+    const text = pain
+      ? `Train Pain: Ich sitze im ${T.line} nach ${to}, gerade +${st.delay} Min. Hier siehst du live, wo der Zug ist und wann ich wirklich ankomme:`
+      : `Ich sitze im ${T.line} nach ${to}. Hier siehst du live, wo der Zug gerade ist und wann ich ankomme:`;
     const result = $('share-result');
     // Kopieren: nur der Link, damit er sich überall einfügen lässt (auch in die Adresszeile)
     if (copyOnly) {
@@ -569,7 +577,7 @@ async function main() {
     }
     if (navigator.share) {
       try {
-        await navigator.share({ title: `${T.line} live mitfahren`, text, url });
+        await navigator.share({ title: pain ? 'Share your Train Pain' : 'Share your Train', text, url });
         result.textContent = 'Geteilt. Der Link zeigt die Fahrt bis zur Ankunft live.';
         return;
       } catch (e) {

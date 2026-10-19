@@ -31,6 +31,12 @@ export function aboutPage(): string {
       <h3>Datenschutz</h3>
       <p class="fine"><b>Kein Tracking, keine Cookies, keine Anmeldung.</b> Schriften und alle Daten kommen vom eigenen Server, es gibt keine Anfragen an Google oder andere Dritte.</p>
       <p class="fine"><b>Standort:</b> Wenn du auf den Standort-Knopf tippst, fragt dein Browser um Erlaubnis. Der Standort wird nur auf deinem Gerät verwendet, um den nächsten Bahnhof zu finden, und nie an den Server gesendet. Geladen werden lediglich die Fahrplandaten der Gegend (Kacheln von etwa 50 × 50 km).</p>
+      <p class="fine"><b>Share your Train:</b> Ein geteilter Link enthält nur Tag, Zug, Ausstieg und den Namen, den du selbst einträgst. Er wird nirgends gespeichert, nur wie jeder Seitenaufruf kurz in den Server-Protokollen verarbeitet. Dein Standort wird nie geteilt.</p>
       <p class="fine"><b>Hosting:</b> Die Seite läuft bei Netlify. Beim Aufruf verarbeitet Netlify technisch notwendige Daten wie die IP-Adresse in Server-Protokollen.</p>
+    </section>
+
+    <section class="card">
+      <h3>Kein Angebot der Deutschen Bahn</h3>
+      <p class="fine">Bahnimprove ist ein unabhängiges Civic-Tech-Projekt und steht in keiner Verbindung zur Deutschen Bahn AG. Alle Angaben ohne Gewähr: Prognosen und Umstiegschancen sind Schätzungen aus offenen Echtzeitdaten. Verbindlich sind die Angaben der Verkehrsunternehmen und die Anzeigen am Bahnsteig.</p>
     </section>`;
 }

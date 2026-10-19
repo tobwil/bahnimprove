@@ -3,7 +3,8 @@ import { deflateSync, inflateSync } from 'node:zlib';
 import { describe, expect, it } from 'vitest';
 import { CARD_H, CARD_W, renderCard, upscale } from '../src/share/card.ts';
 import { encodePng } from '../src/share/png.ts';
-import { cleanName, followHeadline, followStatus, targetIndexOf } from '../src/share/status.ts';
+import { PAIN_MIN, cleanName, followHeadline, followStatus, isPain, targetIndexOf } from '../src/share/status.ts';
+import { shareBrand } from '../src/ui/views.ts';
 import { defaultPolicy, simulate } from '../src/sim/engine.ts';
 import { buildDayModel } from '../src/sim/model.ts';
 import type { Timetable } from '../src/sim/types.ts';
@@ -44,6 +45,15 @@ describe('Live mitfahren', () => {
     const st = followStatus(m.stations, T, { ...R, canceled: true }, 3, R.dep[0]);
     expect(st.state).toBe('canceled');
     expect(followHeadline(st)).toContain('fällt aus');
+  });
+
+  it('Share your Train, ab großer Verspätung Train Pain', () => {
+    expect(isPain(PAIN_MIN - 1)).toBe(false);
+    expect(isPain(PAIN_MIN)).toBe(true);
+    expect(isPain(0, true)).toBe(true);
+    expect(shareBrand(false)).not.toContain('Pain');
+    expect(shareBrand(true)).toContain('<s>Train</s>');
+    expect(shareBrand(true)).toContain('Pain');
   });
 
   it('lässt im Namen nur Buchstaben zu', () => {

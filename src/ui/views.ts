@@ -5,7 +5,7 @@ import type { DayModel } from '../sim/model.ts';
 import { INCIDENT_LABEL, fmtDelay, hhmm, incidentPlace, shortName } from '../sim/text.ts';
 import type { Incident, SimResult } from '../sim/types.ts';
 import { OBS_ARR, OBS_DEP } from '../sim/real.ts';
-import type { FollowStatus } from '../share/status.ts';
+import { isPain, type FollowStatus } from '../share/status.ts';
 import { delayColor, esc } from './dom.ts';
 
 export const lineBadge = (m: DayModel, trip: number) => {
@@ -122,7 +122,7 @@ export function trainDetail(m: DayModel, r: SimResult, trip: number, s: TrainSta
       <div class="detail-meta">${esc(status)} · ${esc(T.operator)}</div>
       <div class="detail-actions">
         ${s ? `<button class="ghost-btn" data-locate-train="${trip}">◎ Auf der Karte zeigen</button>` : ''}
-        ${!R.canceled && now < R.arr[n - 1] ? `<button class="ghost-btn ghost-btn--accent" data-share-train="${trip}">Live mitfahren lassen</button>` : ''}
+        ${!R.canceled && now < R.arr[n - 1] ? `<button class="ghost-btn ghost-btn--accent" data-share-train="${trip}">${shareBrand(!unknown && isPain(Math.max(delayNow, finalDelay)))}</button>` : ''}
       </div>
     </div>
     ${unknown || R.canceled ? '' : `<div class="profile">${profileSvg(m, r, trip, now)}</div>`}
@@ -344,10 +344,14 @@ export function journeyVerdict(m: DayModel, res: JourneyResult): string {
   return `<div class="verdict"><strong>${esc(recText)} passt.</strong>Voraussichtliche Ankunft ${hhmm(rec.predArr)}.${esc(tr)}</div>`;
 }
 
-// --- Live mitfahren --------------------------------------------------------------
+// --- Share your Train (Pain) ------------------------------------------------------
+
+/** "Share your Train" – bei großer Verspätung wird Train durchgestrichen und Pain kommt dazu */
+export const shareBrand = (pain: boolean) =>
+  pain ? `<span class="brand is-pain">Share your <s>Train</s> <b>Pain</b></span>` : `<span class="brand">Share your <b>Train</b></span>`;
 
 /** Formular zum Teilen der eigenen Zugfahrt: Ausstieg wählen, Name optional. */
-export function sharePanel(m: DayModel, trip: number, fromStop: number, name: string): string {
+export function sharePanel(m: DayModel, trip: number, fromStop: number, name: string, pain: boolean): string {
   const T = m.trips[trip];
   const options = T.stops
     .map((s, i) => ({ s, i }))
@@ -355,7 +359,7 @@ export function sharePanel(m: DayModel, trip: number, fromStop: number, name: st
     .map(({ s, i }) => `<option value="${i}"${i === T.stops.length - 1 ? ' selected' : ''}>${esc(m.stations[s].name)} · ${hhmm(T.schedArr[i])}</option>`)
     .join('');
   return `<section class="share-card">
-    <h3 class="share-title">Live mitfahren lassen</h3>
+    <h3 class="share-title">${shareBrand(pain)}</h3>
     <p class="fine">Schick deinen Liebsten einen Link: Sie sehen live, wo dein Zug gerade ist und wann du ankommst. Geteilt wird nur der Zug, nicht dein Standort.</p>
     <label class="field"><span class="eyebrow">Ich steige aus in</span><select id="share-to">${options}</select></label>
     <label class="field"><span class="eyebrow">Dein Name (optional)</span><input id="share-name" type="text" maxlength="20" placeholder="z. B. Tobi" autocomplete="given-name" value="${esc(name)}" /></label>
@@ -387,8 +391,9 @@ export function followCard(st: FollowStatus, who: string, stamp: number): string
           : 'Pünktlich';
   const left = st.minutesLeft >= 60 ? `${Math.floor(st.minutesLeft / 60)} h ${st.minutesLeft % 60} Min` : `${st.minutesLeft} Min`;
   const pct = (st.progress * 100).toFixed(1);
-  return `<section class="follow" style="--c:${c}">
-    <span class="eyebrow"><span class="live-dot"></span> Live mitfahren · ${esc(st.line)}</span>
+  const pain = isPain(st.delay, st.state === 'canceled');
+  return `<section class="follow${pain ? ' is-pain' : ''}" style="--c:${c}">
+    <span class="follow-brand">${shareBrand(pain)}<span class="follow-line"><span class="live-dot"></span>${esc(st.line)} live</span></span>
     <p class="follow-head">${head}</p>
     <p class="follow-delay">${delay}</p>
     <div class="follow-bar" role="img" aria-label="${Math.round(st.progress * 100)} % der Strecke geschafft"><span style="width:${pct}%"></span><i style="left:${pct}%"></i></div>

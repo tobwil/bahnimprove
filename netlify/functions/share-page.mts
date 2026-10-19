@@ -1,6 +1,6 @@
 import type { Config } from '@netlify/functions';
 import { minuteOfServiceDay, tripWithRealtime } from '../realtime-store.mts';
-import { cleanName, followHeadline, followStatus, targetIndexOf } from '../../src/share/status.ts';
+import { cleanName, followHeadline, followStatus, isPain, targetIndexOf } from '../../src/share/status.ts';
 
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
 
@@ -16,13 +16,14 @@ export default async (req: Request) => {
   const [, date, rawId] = m;
   const id = decodeURIComponent(rawId);
   const who = cleanName(url.searchParams.get('von'));
-  let title = 'Live mitfahren – Bahnimprove';
+  let title = 'Share your Train';
   let description = 'Wo der Zug gerade ist und wann er ankommt, live aus den Echtzeitdaten.';
   try {
     const found = await tripWithRealtime(date, id, url.searchParams.get('k') ?? undefined);
     if (found) {
       const st = followStatus(found.stations, found.trip, found.result, targetIndexOf(found.stations, found.trip, url.searchParams.get('bis')), minuteOfServiceDay(date));
-      title = `${who ? `${who} im ` : ''}${st.line} nach ${st.target}`;
+      const pain = st.known && isPain(st.delay, st.state === 'canceled');
+      title = `${pain ? 'Train Pain: ' : ''}${who ? `${who} im ` : ''}${st.line} nach ${st.target}${pain && st.state !== 'canceled' ? ` (+${st.delay} Min)` : ''}`;
       description = `${followHeadline(st, who || undefined)}. Live verfolgen: wo der Zug gerade ist.`;
     }
   } catch {
@@ -40,6 +41,7 @@ export default async (req: Request) => {
   const meta = `<meta property="og:title" content="${esc(title)}" />
     <meta property="og:description" content="${esc(description)}" />
     <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Share your Train" />
     <meta property="og:url" content="${esc(url.toString())}" />
     <meta property="og:image" content="${esc(img.toString())}" />
     <meta property="og:image:width" content="1200" />

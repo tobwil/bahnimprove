@@ -7,6 +7,10 @@ import type { DayModel } from '../sim/model.ts';
 import { hhmm, shortName } from '../sim/text.ts';
 import type { SimResult, TimetableStation, Trip, TripResult } from '../sim/types.ts';
 
+/** Ab dieser erwarteten Verspätung (Minuten) wird aus "Share your Train" "Share your T̶r̶a̶i̶n̶ Pain" */
+export const PAIN_MIN = 15;
+export const isPain = (delay: number, canceled = false) => canceled || delay >= PAIN_MIN;
+
 export type FollowState = 'before' | 'running' | 'arrived' | 'canceled';
 
 export interface FollowStatus {
