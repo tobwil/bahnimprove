@@ -100,8 +100,11 @@ export function renderCard(st: FollowStatus, opts: { name?: string; stamp: numbe
   text(buf, 10, 126, fit(now, CARD_W - 20, 2), C.muted, 2);
   const kg = Math.round(st.co2Kg);
   if (kg >= 1) {
-    const co2 = pain ? `PAIN IS TEMPORARY - CO2 REDUCTION IS FOREVER (${kg} KG)` : `${kg} KG CO2 WENIGER ALS MIT DEM AUTO`;
-    text(buf, 10, CARD_H - 11, co2, C.ok);
+    // Platz bis zur Adresse rechts; beim Pain-Spruch fällt sonst zuerst die kg-Angabe weg
+    const room = CARD_W - 20 - textWidth('SHAREMYTRAIN.DE') - 6;
+    const long = pain ? `PAIN IS TEMPORARY - CO2 REDUCTION IS FOREVER (${kg} KG)` : `${kg} KG CO2 WENIGER ALS MIT DEM AUTO`;
+    const co2 = textWidth(long) <= room || !pain ? long : 'PAIN IS TEMPORARY - CO2 REDUCTION IS FOREVER';
+    text(buf, 10, CARD_H - 11, fit(co2, room, 1), C.ok);
   } else text(buf, 10, CARD_H - 11, `STAND ${hhmm(opts.stamp)} - LINK ZEIGT DIE FAHRT LIVE`, C.dim);
   text(buf, CARD_W - 10 - textWidth('SHAREMYTRAIN.DE'), CARD_H - 11, 'SHAREMYTRAIN.DE', C.lamp);
   return buf;
