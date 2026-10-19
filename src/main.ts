@@ -28,7 +28,7 @@ import { aggregateDay, findings, mergeDays, type Insights } from './insights/agg
 import { searchJourneys, type JourneyResult } from './sim/journey.ts';
 import { matchStations, search } from './sim/search.ts';
 import { insightsPage, insightsTeaser } from './ui/insights.ts';
-import { aboutPage } from './ui/about.ts';
+import { aboutPage, privacyPage } from './ui/about.ts';
 import { boardIndexOf, cleanName, co2Line, followStatus, isPain, targetIndexOf } from './share/status.ts';
 
 /** Ab dieser Uhrzeit beginnt ein neuer Verkehrstag (Nachtzüge laufen über Mitternacht). */
@@ -1036,13 +1036,32 @@ async function main() {
     $('report-body').innerHTML = insights ? insightsPage(insights, lineInfo) : '<div class="loading">Lade Erkenntnisse …<div class="loading-bar"></div></div>';
   };
   $('open-insights').addEventListener('click', openInsights);
-  $('open-about').addEventListener('click', () => {
+  const openAbout = () => {
     $('report-eyebrow').textContent = 'Share my Train';
     $('report-title').textContent = 'Über, Daten & Datenschutz';
     $('report-share').hidden = true;
     overlay.hidden = false;
     overlay.style.setProperty('--c', 'var(--accent)');
     $('report-body').innerHTML = aboutPage();
+    $('report-body').parentElement!.scrollTop = 0;
+  };
+  const openPrivacy = () => {
+    $('report-eyebrow').textContent = 'Share my Train';
+    $('report-title').textContent = 'Datenschutzerklärung';
+    $('report-share').hidden = true;
+    overlay.hidden = false;
+    overlay.style.setProperty('--c', 'var(--accent)');
+    $('report-body').innerHTML = privacyPage();
+    $('report-body').parentElement!.scrollTop = 0;
+  };
+  $('open-about').addEventListener('click', openAbout);
+  // Rechtliche Links (Karte, Fußzeile, Über-Seite) öffnen die Seiten in der App
+  document.addEventListener('click', (e) => {
+    const a = (e.target as HTMLElement).closest<HTMLElement>('[data-legal]');
+    if (!a) return;
+    e.preventDefault();
+    if (a.dataset.legal === 'privacy') openPrivacy();
+    else openAbout();
   });
   $('report-share').addEventListener('click', async () => {
     const url = new URL(location.href);
@@ -1258,6 +1277,7 @@ async function main() {
     openInsights();
     void loadInsights().then(() => !overlay.hidden && insights && ($('report-body').innerHTML = insightsPage(insights, lineInfo)));
   } else if (location.hash === '#abfahrten') selectTab('board');
+  else if (/\/datenschutz\/?$/.test(location.pathname) || location.hash === '#datenschutz') openPrivacy();
   const followLink = location.pathname.match(/^\/zug\/(\d{8})\/([^/]+)\/?$/);
   if (followLink) void startFollow(followLink[1], decodeURIComponent(followLink[2]), new URLSearchParams(location.search));
   watchHostBadge(layoutMap);

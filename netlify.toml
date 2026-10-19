@@ -10,3 +10,15 @@
   from = "/bericht"
   to = "/index.html"
   status = 200
+
+# Datenschutzerklärung als eigene Adresse
+[[redirects]]
+  from = "/datenschutz"
+  to = "/index.html"
+  status = 200
+
+# Impressum des Anbieters (KIsruptiv)
+[[redirects]]
+  from = "/impressum"
+  to = "https://kisruptiv.de/impressum"
+  status = 302

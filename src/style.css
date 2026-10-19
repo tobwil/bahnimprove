@@ -2017,6 +2017,37 @@ a.ghost-btn {
   font-size: 14px;
 }
 
+/* ---------- Rechtliches: immer sichtbar wie eine Karten-Quellenangabe ---------- */
+.legal-links {
+  position: absolute;
+  z-index: 4;
+  left: var(--gutter);
+  bottom: 10px;
+  display: flex;
+  gap: 2px;
+  padding: 3px 4px;
+  border-radius: 8px;
+  background: rgba(7, 10, 20, 0.72);
+  font-size: 11px;
+}
+
+.legal-links a,
+.credits a {
+  color: var(--muted);
+  text-decoration: none;
+  padding: 2px 5px;
+}
+
+.legal-links a:hover,
+.credits a:hover {
+  color: var(--text);
+  text-decoration: underline;
+}
+
+.credits {
+  line-height: 1.7;
+}
+
 /* ---------- Ebenen: Filter und Legende ---------- */
 .tool-btn.is-active {
   color: var(--lamp);
@@ -2366,6 +2397,10 @@ a.ghost-btn {
 
   .tabs {
     display: none;
+  }
+
+  .legal-links {
+    bottom: calc(var(--nav-h) + var(--sheet-peek) + 8px);
   }
 
   .view-title {
