@@ -1,3 +1,5 @@
+const PROVIDER = `Wilhelm &amp; Zeitlmann GbR – KIsruptiv<br />Schmiedsgasse 29<br />96450 Coburg`;
+
 /** Seite "Über, Daten & Datenschutz" – Methode, Quellen, Lizenzen, Downloads. */
 export function aboutPage(): string {
   return `
@@ -30,7 +32,7 @@ export function aboutPage(): string {
     <section class="card">
       <h3>Datenschutz</h3>
       <p class="fine"><b>Kein Tracking, keine Cookies, keine Anmeldung.</b> Dein Standort bleibt auf deinem Gerät. Alles Weitere in der <a href="/datenschutz" data-legal="privacy">Datenschutzerklärung</a>.</p>
-      <p class="fine">Anbieter: KIsruptiv, siehe <a href="/impressum" target="_blank" rel="noopener">Impressum</a>.</p>
+      <p class="fine">Anbieter: Wilhelm &amp; Zeitlmann GbR – KIsruptiv, Coburg. Siehe <a href="/impressum" data-legal="imprint">Impressum</a>.</p>
     </section>
 
     <section class="card">
@@ -44,7 +46,8 @@ export function privacyPage(): string {
   return `
     <section class="card">
       <h3>Verantwortlich</h3>
-      <p class="fine">Verantwortlich für die Datenverarbeitung auf sharemytrain.de und train.kisruptiv.de ist KIsruptiv. Name, Anschrift und Kontakt stehen im <a href="/impressum" target="_blank" rel="noopener">Impressum</a>.</p>
+      <p class="fine">Verantwortlich für die Datenverarbeitung auf sharemytrain.de und train.kisruptiv.de:</p>
+      <p class="fine">${PROVIDER}<br />vertreten durch Anja Zeitlmann und Tobias Wilhelm<br />E-Mail: <a href="mailto:info@kisruptiv.de">info@kisruptiv.de</a></p>
     </section>
 
     <section class="card">
@@ -79,7 +82,34 @@ export function privacyPage(): string {
 
     <section class="card">
       <h3>Deine Rechte</h3>
-      <p class="fine">Du hast das Recht auf Auskunft, Berichtigung, Löschung, Einschränkung der Verarbeitung, Datenübertragbarkeit und Widerspruch (Art. 15–21 DSGVO). Wende dich dafür an die Kontaktadresse im Impressum. Außerdem kannst du dich bei einer Datenschutz-Aufsichtsbehörde beschweren, zum Beispiel beim Bayerischen Landesamt für Datenschutzaufsicht (BayLDA), Ansbach.</p>
+      <p class="fine">Du hast das Recht auf Auskunft, Berichtigung, Löschung, Einschränkung der Verarbeitung, Datenübertragbarkeit und Widerspruch (Art. 15–21 DSGVO). Schreib dafür an <a href="mailto:info@kisruptiv.de">info@kisruptiv.de</a>. Außerdem kannst du dich bei einer Datenschutz-Aufsichtsbehörde beschweren, zum Beispiel beim Bayerischen Landesamt für Datenschutzaufsicht (BayLDA), Ansbach.</p>
       <p class="fine">Stand: Oktober 2026</p>
+    </section>`;
+}
+
+/** Impressum (eigene Seite unter /impressum) */
+export function imprintPage(): string {
+  return `
+    <section class="card">
+      <h3>Angaben gemäß § 5 DDG</h3>
+      <p class="fine">${PROVIDER}</p>
+      <p class="fine"><b>Vertreten durch</b><br />Anja Zeitlmann, Tobias Wilhelm</p>
+    </section>
+
+    <section class="card">
+      <h3>Kontakt</h3>
+      <p class="fine">Telefon: <a href="tel:+4915140386791">+49 (0)151 40386791</a> | <a href="tel:+4915159114538">+49 (0)151 59114538</a><br />E-Mail: <a href="mailto:info@kisruptiv.de">info@kisruptiv.de</a></p>
+    </section>
+
+    <section class="card">
+      <h3>Verantwortlich für den Inhalt nach § 18 Abs. 2 MStV</h3>
+      <p class="fine">Anja Zeitlmann, Tobias Wilhelm<br />Schmiedsgasse 29<br />96450 Coburg</p>
+    </section>
+
+    <section class="card">
+      <h3>Hinweise</h3>
+      <p class="fine">Share my Train (sharemytrain.de, train.kisruptiv.de) ist ein unabhängiges, kostenloses Angebot und steht in keiner Verbindung zur Deutschen Bahn AG. Alle Angaben zu Fahrten, Verspätungen und Umstiegen ohne Gewähr; verbindlich sind die Angaben der Verkehrsunternehmen.</p>
+      <p class="fine">Wir sind nicht bereit und nicht verpflichtet, an Streitbeilegungsverfahren vor einer Verbraucherschlichtungsstelle teilzunehmen.</p>
+      <p class="fine"><a href="/datenschutz" data-legal="privacy">Datenschutzerklärung</a></p>
     </section>`;
 }

@@ -17,8 +17,8 @@
   to = "/index.html"
   status = 200
 
-# Impressum des Anbieters (KIsruptiv)
+# Impressum als eigene Adresse
 [[redirects]]
   from = "/impressum"
-  to = "https://kisruptiv.de/impressum"
-  status = 302
+  to = "/index.html"
+  status = 200
