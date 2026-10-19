@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { aggregateDay, findings, mergeDays } from '../src/insights/aggregate.ts';
 import { defaultPolicy, simulate } from '../src/sim/engine.ts';
 import { searchJourneys, transferProbability } from '../src/sim/journey.ts';
+import { hotspotsAt } from '../src/sim/live.ts';
 import { buildDayModel } from '../src/sim/model.ts';
 import { observedResult } from '../src/sim/real.ts';
 import { fold, lineMatches, lineQuery, matchStations, search, searchWords } from '../src/sim/search.ts';
@@ -143,5 +144,18 @@ describe('Liniensuche', () => {
     expect(lineMatches('rb19', n)).toBe(true);
     expect(lineMatches('re119', n)).toBe(false);
     expect(lineQuery(searchWords('Coburg'))).toBeNull();
+  });
+});
+
+describe('Brennpunkte', () => {
+  it('nennen Linien und den letzten Zuwachs innerhalb der Stunde', () => {
+    const found = [8, 10, 12, 14, 16, 18].flatMap((h) => hotspotsAt(m, r, h * 60).map((x) => ({ ...x, t: h * 60 })));
+    expect(found.length).toBeGreaterThan(0);
+    for (const h of found) {
+      expect(h.lines.length).toBeGreaterThan(0);
+      expect(h.lines.length).toBeLessThanOrEqual(h.trains);
+      expect(h.last).toBeLessThanOrEqual(h.t);
+      expect(h.last).toBeGreaterThanOrEqual(h.t - 60);
+    }
   });
 });

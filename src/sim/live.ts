@@ -1,7 +1,7 @@
 import { PUNCTUAL_LIMIT } from './analysis.ts';
 import { inGermany, type DayModel } from './model.ts';
 import { counts } from './real.ts';
-import type { Incident, SimResult } from './types.ts';
+import type { Incident, SimResult, Trip } from './types.ts';
 
 export interface TrainState {
   trip: number;
@@ -56,18 +56,25 @@ export function activeIncidents(m: DayModel, t: number): Incident[] {
 
 export interface LiveHotspot {
   station: number;
+  /** Zuwachs aller Züge zusammen */
   minutes: number;
   trains: number;
+  /** Betroffene Linien, die mit dem größten Zuwachs zuerst */
+  lines: string[];
+  /** Zeitpunkt des letzten Zuwachses (Minute im Verkehrstag) */
+  last: number;
 }
 
 /** Wo wächst die Verspätung gerade? Zuwachs je Bahnhof aus Fahrten und Halten der letzten `window` Minuten. */
 export function hotspotsAt(m: DayModel, r: SimResult, t: number, window = 60): LiveHotspot[] {
-  const acc = new Map<number, { minutes: number; trains: Set<number> }>();
-  const add = (station: number, trip: number, g: number) => {
+  const acc = new Map<number, { minutes: number; trains: Set<number>; lines: Map<string, number>; last: number }>();
+  const add = (station: number, T: Trip, g: number, at: number) => {
     if (g < 1) return;
-    const e = acc.get(station) ?? { minutes: 0, trains: new Set<number>() };
+    const e = acc.get(station) ?? { minutes: 0, trains: new Set<number>(), lines: new Map<string, number>(), last: 0 };
     e.minutes += g;
-    e.trains.add(trip);
+    e.trains.add(T.id);
+    e.lines.set(T.line, (e.lines.get(T.line) ?? 0) + g);
+    e.last = Math.max(e.last, at);
     acc.set(station, e);
   };
   for (const T of m.trips) {
@@ -77,12 +84,12 @@ export function hotspotsAt(m: DayModel, r: SimResult, t: number, window = 60): L
       const a = R.arr[i + 1];
       if (a > t) break;
       if (a < t - window) continue;
-      add(T.stops[i + 1], T.id, a - T.schedArr[i + 1] - (R.dep[i] - T.schedDep[i]));
-      if (i > 0 && R.dep[i] >= t - window) add(T.stops[i], T.id, R.dep[i] - T.schedDep[i] - (R.arr[i] - T.schedArr[i]));
+      add(T.stops[i + 1], T, a - T.schedArr[i + 1] - (R.dep[i] - T.schedDep[i]), a);
+      if (i > 0 && R.dep[i] >= t - window) add(T.stops[i], T, R.dep[i] - T.schedDep[i] - (R.arr[i] - T.schedArr[i]), R.dep[i]);
     }
   }
   return [...acc.entries()]
-    .map(([station, e]) => ({ station, minutes: e.minutes, trains: e.trains.size }))
+    .map(([station, e]) => ({ station, minutes: e.minutes, trains: e.trains.size, lines: [...e.lines].sort((a, b) => b[1] - a[1]).map(([l]) => l), last: e.last }))
     .filter((h) => h.minutes >= 3)
     .sort((a, b) => b.minutes - a.minutes);
 }

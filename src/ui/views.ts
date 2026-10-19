@@ -35,12 +35,26 @@ export function trainRow(m: DayModel, s: TrainState): string {
   </li>`;
 }
 
+/** Hinweis auf der Tafel: Verspätung der letzten Stunde, die schon abgefahrene Züge betraf */
+function recentNote(h: LiveHotspot): string {
+  const lines = esc(h.lines.slice(0, 3).join(', '));
+  const who = h.trains === 1 ? `${lines} hat` : `${h.trains} Züge (${lines}) haben`;
+  return `Letzte Stunde: ${who} hier zusammen <b>+${Math.round(h.minutes)} Min</b> verloren, zuletzt ${hhmm(h.last)} – schon abgefahren.`;
+}
+
+/** "3 Züge zusammen · ICE 13, RE 10 · zuletzt 23:17" – damit klar ist, dass es vorbei ist und wen es traf */
+export function hotspotSub(h: LiveHotspot): string {
+  const lines = h.lines.slice(0, 3).join(', ') + (h.lines.length > 3 ? ' …' : '');
+  const who = h.trains === 1 ? lines : `${h.trains} Züge zusammen · ${lines}`;
+  return `${esc(who)} · zuletzt ${hhmm(h.last)}`;
+}
+
 export function hotspotRow(m: DayModel, h: LiveHotspot): string {
   const st = m.stations[h.station];
   const perTrain = h.minutes / Math.max(1, h.trains);
   return `<li class="row" data-lon="${st.lon}" data-lat="${st.lat}" data-station="${h.station}">
-    <span class="pin" style="--c:${delayColor(perTrain * 2.5)}">+${Math.round(h.minutes)}</span>
-    <span class="row-main"><span class="row-title">${esc(shortName(st.name))}</span><span class="row-sub">${h.trains} ${h.trains === 1 ? 'Zug hat' : 'Züge haben'} hier Zeit verloren</span></span>
+    <span class="pin" style="--c:${delayColor(perTrain * 2.5)}" title="Minuten, die alle Züge hier zusammen verloren haben">+${Math.round(h.minutes)}</span>
+    <span class="row-main"><span class="row-title">${esc(shortName(st.name))}</span><span class="row-sub">${hotspotSub(h)}</span></span>
     <span></span>
   </li>`;
 }
@@ -149,6 +163,8 @@ export interface BoardOptions {
   typical?: TypicalDelay;
   /** Regionalzüge für diesen Bahnhof werden noch geladen */
   loading?: boolean;
+  /** Brennpunkt der letzten Stunde an diesem Bahnhof (betrifft schon abgefahrene Züge) */
+  recent?: LiveHotspot;
 }
 
 const BOARD_WINDOW = 180;
@@ -249,6 +265,7 @@ export function departureBoard(m: DayModel, r: SimResult, station: number, now: 
   return `<div class="board">
     <div class="board-top"><p class="board-title">${esc(shortName(m.stations[station].name))}</p><span class="board-clock">${hhmm(now)}</span></div>
     ${summary ? `<p class="board-summary">${summary}</p>` : ''}
+    ${o.recent ? `<p class="board-recent">${recentNote(o.recent)}</p>` : ''}
     ${
       html
         ? `<ul class="deps">${html}</ul>`
