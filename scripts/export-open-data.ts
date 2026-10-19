@@ -74,7 +74,7 @@ ${reasons.map(([c, n]) => `- ${reasonText(+c)}: ${Math.round((n / rTotal) * 100)
 ## Methode
 
 Nur beobachtete Ist-Zeiten (keine Prognosen). Ein Befund ist *belastbar* ab 40 Fällen aus mindestens 7 Tagen, wenn er an der Mehrzahl der Tage auftritt.
-Daten: DELFI e.V./gtfs.de (CC BY 4.0), Verspätungsgründe: IRIS-Schnittstelle der Deutschen Bahn. Diese Auswertung: CC BY 4.0, Bahnimprove.
+Fahrplan: DELFI e.V./gtfs.de (CC BY 4.0), Echtzeit: gtfs.de (CC BY-SA 4.0), Verspätungsgründe: IRIS-Schnittstelle der Deutschen Bahn. Diese Auswertung: CC BY-SA 4.0, Bahnimprove.
 `;
   writeFileSync(`${DIR}/berichte/${week}.md`, md);
   console.log(`${added} neue Tage, ${ins.findings.length} Befunde, Bericht ${week}`);

@@ -4,13 +4,13 @@ import { dayAggregates, reasonDays } from '../realtime-store.mts';
 /**
  * GET /api/open-data – Index der verfügbaren Tage
  * GET /api/open-data?date=YYYYMMDD – verdichtete Tageswerte und gemeldete Gründe dieses Tags
- * Lizenz: CC BY 4.0, Quelle: Bahnimprove, Daten: DELFI e.V./gtfs.de, Deutsche Bahn
+ * Lizenz: CC BY-SA 4.0 (abgeleitet aus der Echtzeit von gtfs.de, CC BY-SA 4.0), Quelle: Bahnimprove, Daten: DELFI e.V./gtfs.de, Deutsche Bahn
  */
 export default async (req: Request) => {
   const date = new URL(req.url).searchParams.get('date');
   const [aggs, reasons] = await Promise.all([dayAggregates(), reasonDays()]);
   const headers = { 'Cache-Control': 'public, max-age=600', 'Netlify-CDN-Cache-Control': 'public, s-maxage=3600' };
-  const license = 'CC BY 4.0 – Bahnimprove, Daten: DELFI e.V./gtfs.de, Deutsche Bahn (IRIS)';
+  const license = 'CC BY-SA 4.0 – Bahnimprove, Daten: DELFI e.V./gtfs.de (Fahrplan CC BY 4.0, Echtzeit CC BY-SA 4.0), Deutsche Bahn (IRIS)';
   if (!date) return Response.json({ license, days: aggs.map((a) => a.date), reasons: reasons.map((r) => r.date) }, { headers });
   const agg = aggs.find((a) => a.date === date) ?? null;
   const r = reasons.find((x) => x.date === date);

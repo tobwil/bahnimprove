@@ -108,11 +108,12 @@ src/main.ts                  App, Zeitsteuerung, Seitenleiste
 ## Lizenzen
 
 - Code: [MIT](LICENSE)
-- Offene Daten in `open-data/` und unter `/api/*`: CC BY 4.0, Quellenangabe „Bahnimprove, Daten: DELFI e.V./gtfs.de, Deutsche Bahn (IRIS)“
+- Offene Daten in `open-data/` und unter `/api/*`: CC BY-SA 4.0 (abgeleitet aus dem Echtzeit-Feed unter CC BY-SA 4.0), Quellenangabe „Bahnimprove, Daten: DELFI e.V./gtfs.de, Deutsche Bahn (IRIS)“
 
 ## Datenquellen & Lizenzen
 
-- Fahrplan und Echtzeit: [gtfs.de](https://gtfs.de) (Fernverkehr-GTFS und GTFS-Realtime „free“), Daten von DELFI e.V., CC BY 4.0. Vor einer kommerziellen Nutzung die Bedingungen von gtfs.de prüfen.
+- Fahrplan: [gtfs.de](https://gtfs.de) (freie GTFS-Basisversion, Daten von DELFI e.V., CC BY 4.0, Gültigkeit 30 Tage)
+- Echtzeit: [gtfs.de GTFS-Realtime](https://gtfs.de/de/realtime/) „free“, CC BY-SA 4.0 (kommerzielle Nutzung mit Namensnennung und Weitergabe unter gleichen Bedingungen erlaubt; einzelne Quellen im Feed haben laut gtfs.de eigene Vereinbarungen). Abruf nur serverseitig alle 2 Minuten.
 - Landesgrenzen: [Natural Earth](https://www.naturalearthdata.com) über `world-atlas`, Public Domain
 - Verspätungsgründe: öffentliche IRIS-Schnittstelle der Deutschen Bahn
 - Schriften: Geist, Pixelify Sans, Silkscreen (OFL), lokal ausgeliefert über Fontsource, keine Anfragen an Google
