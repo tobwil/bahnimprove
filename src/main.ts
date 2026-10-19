@@ -4,8 +4,6 @@ import '@fontsource/geist-sans/latin-500.css';
 import '@fontsource/geist-sans/latin-600.css';
 import '@fontsource/geist-mono/latin-400.css';
 import '@fontsource/geist-mono/latin-500.css';
-import '@fontsource/pixelify-sans/latin-500.css';
-import '@fontsource/pixelify-sans/latin-700.css';
 import '@fontsource/silkscreen/latin-400.css';
 import './style.css';
 import { dailyReport, type DailyReport, type Objective } from './sim/analysis.ts';
@@ -19,7 +17,7 @@ import type { RealtimeDay } from './realtime/types.ts';
 import { causeText, fmtDelay, hhmm, shortName, tripLabel } from './sim/text.ts';
 import type { SimResult, Timetable } from './sim/types.ts';
 import { $, delayColor, esc } from './ui/dom.ts';
-import { PixelMap } from './ui/map.ts';
+import { PixelMap, type LabelMode } from './ui/map.ts';
 import type { MapData } from './ui/mapdata.ts';
 import { gradeOf, renderReport } from './ui/report.ts';
 import { MapGestures } from './ui/gestures.ts';
@@ -185,10 +183,18 @@ async function main() {
     $('day-today').classList.toggle('is-active', state.day.date === today);
     $('day-yesterday').classList.toggle('is-active', state.day.date === addDays(today, -1));
     $('go-live').classList.toggle('is-replay', !state.live);
-    $('clock-mode').textContent = state.live ? 'Live' : `${fmtDate(state.day.date)}`;
+    $('go-live').setAttribute('aria-label', state.live ? 'Live' : 'Zurück zu Live');
+    $('clock-mode').textContent = state.live ? 'Live' : 'Wiedergabe';
+    // Wiedergabe deutlich sichtbar auf der Karte, mit eigenem Weg zurück zu Live
+    $('replay-bar').hidden = state.live;
+    $('replay-date').textContent = state.day.date === serviceNow().date ? 'Heute' : fmtDate(state.day.date);
     $('play').textContent = state.playing ? '❚❚' : '▶';
     $('play').setAttribute('aria-label', state.playing ? 'Pause' : 'Abspielen');
-    $('speed').textContent = state.live ? 'Live' : `${state.speed}×`;
+    $('speed').textContent = `${state.speed}×`;
+    const tb = $('timeline-btn');
+    tb.textContent = state.live ? 'Rückblick' : '● Live';
+    tb.classList.toggle('is-live', !state.live);
+    tb.setAttribute('aria-label', state.live ? 'Den Tag im Zeitraffer abspielen' : 'Zurück zu Live');
   };
 
   const switchDay = async (date: string) => {
@@ -218,15 +224,21 @@ async function main() {
     syncControls();
   });
   $('play').addEventListener('click', () => {
-    if (state.live) state.live = false;
     state.playing = !state.playing;
     syncControls();
   });
   $('speed').addEventListener('click', () => {
-    if (state.live) {
-      state.live = false;
-      state.speed = 60;
-    } else state.speed = SPEEDS[(SPEEDS.indexOf(state.speed) + 1) % SPEEDS.length];
+    state.speed = SPEEDS[(SPEEDS.indexOf(state.speed) + 1) % SPEEDS.length];
+    state.playing = true;
+    syncControls();
+  });
+  $('replay-live').addEventListener('click', goLive);
+  // Rückblick: den bisherigen Tag ab 5 Uhr im Zeitraffer; im Rückblick führt derselbe Knopf zurück zu Live
+  $('timeline-btn').addEventListener('click', () => {
+    if (!state.live) return void goLive();
+    state.live = false;
+    state.time = 5 * 60;
+    state.speed = 300;
     state.playing = true;
     syncControls();
   });
@@ -256,6 +268,66 @@ async function main() {
   $('zoom-in').addEventListener('click', () => map.zoomAt(1.5, map.w / 2, map.h / 2));
   $('zoom-out').addEventListener('click', () => map.zoomAt(1 / 1.5, map.w / 2, map.h / 2));
   $('zoom-reset').addEventListener('click', () => map.reset());
+
+  // --- Ebenen: Beschriftung, Zugfilter, Legende -------------------------------------
+  type TrainKind = 'fv' | 'rv' | 's' | 'late';
+  const PREFS_KEY = 'bahnimprove.map';
+  const prefs = { labels: 'few' as LabelMode, show: { fv: true, rv: true, s: true, late: false } as Record<TrainKind, boolean> };
+  try {
+    const saved = JSON.parse(localStorage.getItem(PREFS_KEY) ?? 'null');
+    if (saved && ['few', 'many', 'off'].includes(saved.labels)) prefs.labels = saved.labels;
+    if (saved?.show) for (const k of Object.keys(prefs.show) as TrainKind[]) if (typeof saved.show[k] === 'boolean') prefs.show[k] = saved.show[k];
+  } catch {
+    // Standard behalten
+  }
+  const savePrefs = () => {
+    try {
+      localStorage.setItem(PREFS_KEY, JSON.stringify(prefs));
+    } catch {
+      // nicht speicherbar, gilt dann nur für diesen Besuch
+    }
+  };
+  const layersEl = $('layers');
+  const syncLayers = () => {
+    map.setLabelMode(prefs.labels);
+    layersEl.querySelectorAll<HTMLElement>('[data-label]').forEach((b) => b.classList.toggle('is-active', b.dataset.label === prefs.labels));
+    layersEl.querySelectorAll<HTMLElement>('[data-kind]').forEach((b) => {
+      const on = prefs.show[b.dataset.kind as TrainKind];
+      b.classList.toggle('is-active', on);
+      b.setAttribute('aria-pressed', String(on));
+    });
+    // Ein Filter ist aktiv: der Knopf leuchtet, damit niemand Züge vermisst
+    const filtered = prefs.labels !== 'few' || !prefs.show.fv || !prefs.show.rv || !prefs.show.s || prefs.show.late;
+    $('layers-btn').classList.toggle('is-active', filtered);
+  };
+  syncLayers();
+  $('layers-btn').addEventListener('click', () => {
+    layersEl.hidden = !layersEl.hidden;
+    $('layers-btn').setAttribute('aria-expanded', String(!layersEl.hidden));
+  });
+  layersEl.addEventListener('click', (e) => {
+    const b = (e.target as HTMLElement).closest<HTMLElement>('[data-label], [data-kind]');
+    if (!b) return;
+    if (b.dataset.label) prefs.labels = b.dataset.label as LabelMode;
+    else {
+      const k = b.dataset.kind as TrainKind;
+      prefs.show[k] = !prefs.show[k];
+    }
+    savePrefs();
+    syncLayers();
+  });
+  canvas.addEventListener('pointerdown', () => {
+    if (!layersEl.hidden) {
+      layersEl.hidden = true;
+      $('layers-btn').setAttribute('aria-expanded', 'false');
+    }
+  });
+  /** Welche Züge die Karte zeigt (Listen und Kennzahlen bleiben vollständig) */
+  const visibleOnMap = (t: TrainState, m: DayModel, fvCount: number) => {
+    if (prefs.show.late && !(t.known && t.delay >= 6)) return false;
+    if (t.trip < fvCount) return prefs.show.fv;
+    return m.trips[t.trip].category === 'S' ? prefs.show.s : prefs.show.rv;
+  };
 
   const tooltip = $('tooltip');
   function hover(cssX: number, cssY: number) {
@@ -744,13 +816,47 @@ async function main() {
   }
   void loadInsights().then(() => renderPanels(netTrains()));
   setInterval(() => void loadInsights(), 30 * 60_000);
+  /** Steckbrief einer Linie aus dem Fahrplan des Tages und den Befunden, die sie betreffen */
+  const lineInfo = (line: string, ins: Insights) => {
+    const m = state.day.model;
+    const trips = m.trips.filter((T) => T.line === line);
+    const lineStat = ins.lines.find((l) => l.line === line);
+    if (!trips.length) return `<p class="fine">Heute fährt ${esc(line)} laut Fahrplan nicht.</p>`;
+    // Häufigster Laufweg (Richtung egal) als Strecke
+    const routes = new Map<string, { n: number; stops: number[] }>();
+    for (const T of trips) {
+      const a = T.stops[0], b = T.stops[T.stops.length - 1];
+      const key = a < b ? `${a}|${b}` : `${b}|${a}`;
+      const r = routes.get(key) ?? { n: 0, stops: T.stops };
+      r.n++;
+      if (T.stops.length > r.stops.length) r.stops = a < b ? T.stops : [...T.stops].reverse();
+      routes.set(key, r);
+    }
+    const main = [...routes.values()].sort((x, y) => y.n - x.n)[0].stops;
+    const via = main.slice(1, -1).filter((s) => m.stations[s].weight > 200).map((s) => shortName(m.stations[s].name));
+    const operators = [...new Set(trips.map((T) => T.operator).filter(Boolean))];
+    const sn = (s: number) => shortName(m.stations[s].name);
+    const running = netTrains().filter((t) => m.trips[t.trip]?.line === line && t.trip < net().fvCount);
+    const late = running.filter((t) => t.known && t.delay >= 6);
+    const related = ins.findings.filter((f) => f.evidence.includes(`${line})`) || f.evidence.includes(`${line},`) || f.evidence.includes(`${line} `)).slice(0, 3);
+    return `
+      <p class="line-route"><b>${esc(sn(main[0]))} ⇄ ${esc(sn(main[main.length - 1]))}</b>${via.length ? `<br><span class="sub">über ${esc(via.slice(0, 6).join(' · '))}</span>` : ''}</p>
+      <dl class="line-facts">
+        <div><dt>Betreiber</dt><dd>${esc(operators.join(', ') || '–')}</dd></div>
+        <div><dt>Fahrten heute</dt><dd>${trips.length}</dd></div>
+        <div><dt>Pünktlich</dt><dd>${lineStat ? `${Math.round(lineStat.punctuality * 100)} % von ${lineStat.arrivals} Ankünften` : '–'}</dd></div>
+        <div><dt>Gerade unterwegs</dt><dd>${running.length ? `${running.length}${late.length ? `, davon ${late.length} verspätet` : ''}` : 'keiner'}</dd></div>
+      </dl>
+      ${related.length ? `<p class="eyebrow" style="margin:10px 0 4px">Wo diese Linie Zeit verliert</p><ul class="line-related">${related.map((f) => `<li><b>${esc(f.place)}</b> ${esc(f.evidence)}</li>`).join('')}</ul>` : ''}
+      <button class="ghost-btn" data-show-line="${esc(line)}">Züge von ${esc(line)} auf der Karte</button>`;
+  };
   const openInsights = () => {
     $('report-eyebrow').textContent = 'Lessons learned für die DB';
     $('report-title').textContent = 'Was die DB lernen kann';
     overlay.hidden = false;
     overlay.style.setProperty('--c', 'var(--lamp)');
     $('report-share').hidden = false;
-    $('report-body').innerHTML = insights ? insightsPage(insights) : '<div class="loading">Lade Erkenntnisse …<div class="loading-bar"></div></div>';
+    $('report-body').innerHTML = insights ? insightsPage(insights, lineInfo) : '<div class="loading">Lade Erkenntnisse …<div class="loading-bar"></div></div>';
   };
   $('open-insights').addEventListener('click', openInsights);
   $('open-about').addEventListener('click', () => {
@@ -886,6 +992,13 @@ async function main() {
       objectiveChosen = true;
       return showReport();
     }
+    const sl = (e.target as HTMLElement).closest<HTMLElement>('[data-show-line]');
+    if (sl) {
+      overlay.hidden = true;
+      $<HTMLInputElement>('search').value = sl.dataset.showLine!;
+      selectTab('search');
+      return;
+    }
     const b = (e.target as HTMLElement).closest<HTMLElement>('[data-show-trip]');
     if (!b) return;
     overlay.hidden = true;
@@ -940,7 +1053,7 @@ async function main() {
     }
     const maxHot = Math.max(30, ...state.hotspots.map((h) => h.minutes));
     map.draw({
-      trains,
+      trains: trains.filter((t) => visibleOnMap(t, n.model, n.fvCount)),
       incidents: activeIncidents(d.model, state.time),
       fvCount: n.fvCount,
       hotspots: state.hotspots.slice(0, 8).map((h) => ({ station: h.station, intensity: h.minutes / maxHot })),
@@ -958,7 +1071,7 @@ async function main() {
   const isReportLink = /\/bericht\/?$/.test(location.pathname) || location.hash === '#bericht';
   if (isReportLink) {
     openInsights();
-    void loadInsights().then(() => !overlay.hidden && insights && ($('report-body').innerHTML = insightsPage(insights)));
+    void loadInsights().then(() => !overlay.hidden && insights && ($('report-body').innerHTML = insightsPage(insights, lineInfo)));
   } else if (location.hash === '#abfahrten') selectTab('board');
   layoutMap();
   syncControls();

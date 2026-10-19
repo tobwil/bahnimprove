@@ -46,6 +46,7 @@ const C = {
   lamp: px('#ffc56b'),
   lampDim: px('#b3803a'),
   label: px('#e3e9f8'),
+  labelDim: px('#8d98b8'),
   labelShadow: px('#05070f'),
   route: px('#ffc56b'),
   routeGlow: px('#ff9e3d'),
@@ -112,6 +113,8 @@ export interface Frame {
   fvCount?: number;
 }
 
+export type LabelMode = 'few' | 'many' | 'off';
+
 export class PixelMap {
   private ctx: CanvasRenderingContext2D;
   private glowCtx: CanvasRenderingContext2D;
@@ -137,6 +140,10 @@ export class PixelMap {
   private stationXY = new Float32Array(0);
   private lastTrains: { x: number; y: number; trip: number }[] = [];
   private dirty = true;
+  /** Wie viele Bahnhöfe beschriftet werden: wenige große, viele oder keine */
+  private labelMode: LabelMode = 'few';
+  /** Eigener Standort: Platz für die Marke "DU" freihalten */
+  private userPos?: { lon: number; lat: number };
   private lightLevel = -1;
   private cityLights: { station: number; dx: number; dy: number; warm: boolean }[] = [];
 
@@ -149,6 +156,12 @@ export class PixelMap {
     this.ctx = canvas.getContext('2d')!;
     this.glowCtx = glowCanvas.getContext('2d')!;
     this.setModel(model);
+  }
+
+  setLabelMode(mode: LabelMode) {
+    if (mode === this.labelMode) return;
+    this.labelMode = mode;
+    this.dirty = true;
   }
 
   setModel(model: DayModel, fvCount = model.trips.length) {
@@ -364,16 +377,26 @@ export class PixelMap {
   }
 
   private renderLabels(buf: Uint32Array, used: Set<number>) {
+    if (this.labelMode === 'off') return;
     const st = this.model.stations;
-    const rank = (i: number) => st[i].weight * 10 + (this.zoom >= 4 ? (st[i].w ?? 0) : 0);
+    const many = this.labelMode === 'many';
+    // "Wenige": nur Fernverkehrshalte, erst ganz nah auch kleinere Bahnhöfe; dazu mehr Abstand,
+    // damit die Züge zwischen den Namen sichtbar bleiben
+    const rank = (i: number) => st[i].weight * 10 + (many ? (this.zoom >= 4 ? (st[i].w ?? 0) : 0) : this.zoom >= 7 ? (st[i].w ?? 0) / 4 : 0);
     const candidates = [...used].filter((i) => inGermany(st[i]) && !/\(Gr\)|Grenze/.test(st[i].name) && rank(i) > 0).sort((a, b) => rank(b) - rank(a));
     const taken: { x: number; y: number; w: number; h: number }[] = [];
+    if (this.userPos) {
+      const [ux, uy] = this.project(this.userPos.lon, this.userPos.lat);
+      taken.push({ x: Math.round(ux) - 4, y: Math.round(uy) - 4, w: textWidth('DU') + 10, h: 8 });
+    }
     const names = new Set<string>();
-    const maxLabels = Math.max(9, Math.round(14 * this.zoom * Math.min(1.6, (this.w * this.h) / 120000)));
+    const area = Math.min(1.6, (this.w * this.h) / 120000);
+    const maxLabels = many ? Math.max(9, Math.round(14 * this.zoom * area)) : Math.max(8, Math.round((6 + 3 * this.zoom) * area));
+    const gapX = many ? 3 : 12, gapY = many ? 2 : 8;
     for (const i of candidates) {
       if (taken.length >= maxLabels) break;
       const name = shortName(st[i].name).split(/[ ,]/)[0];
-      if (names.has(name) && this.zoom < 3) continue;
+      if (names.has(name) && (this.zoom < 3 || !many)) continue;
       const label = this.zoom >= 3 ? shortName(st[i].name) : name;
       const x = Math.round(this.stationXY[i * 2]), y = Math.round(this.stationXY[i * 2 + 1]);
       const tw = textWidth(label);
@@ -386,12 +409,12 @@ export class PixelMap {
       const spot = opts.find(
         (o) =>
           o.x > 1 && o.y > 1 && o.x + tw < this.w - 1 && o.y + 6 < this.h &&
-          !taken.some((r) => o.x < r.x + r.w + 3 && o.x + tw + 3 > r.x && o.y < r.y + r.h + 2 && o.y + 7 > r.y),
+          !taken.some((r) => o.x < r.x + r.w + gapX && o.x + tw + gapX > r.x && o.y < r.y + r.h + gapY && o.y + 5 + gapY > r.y),
       );
       if (!spot) continue;
       taken.push({ x: spot.x, y: spot.y, w: tw, h: 5 });
       names.add(name);
-      drawText(buf, this.w, this.h, spot.x, spot.y, label, C.label, C.labelShadow);
+      drawText(buf, this.w, this.h, spot.x, spot.y, label, st[i].weight > 100 ? C.label : C.labelDim, C.labelShadow);
     }
   }
 
@@ -442,6 +465,10 @@ export class PixelMap {
 
   draw(f: Frame) {
     this.resize();
+    if (f.user?.lon !== this.userPos?.lon || f.user?.lat !== this.userPos?.lat) {
+      this.userPos = f.user;
+      this.dirty = true;
+    }
     const light = Math.round(daylight(f.minute) * 16) / 16;
     if (this.dirty || light !== this.lightLevel) {
       this.renderStatic(light);
@@ -538,6 +565,7 @@ export class PixelMap {
       this.rect(buf, Math.round(x) - 1, Math.round(y) - 1, 3, 3, C.select);
       this.rect(buf, Math.round(x), Math.round(y), 1, 1, C.user);
       this.rect(glow, Math.round(x) - 1, Math.round(y) - 1, 3, 3, C.user);
+      drawText(buf, this.w, this.h, Math.round(x) + 5, Math.round(y) - 2, 'DU', C.user, C.labelShadow);
     }
     this.ctx.putImageData(this.image, 0, 0);
     this.glowCtx.putImageData(this.glowImage, 0, 0);

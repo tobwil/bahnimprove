@@ -61,7 +61,10 @@ export function insightsTeaser(ins: Insights | null): string {
     <div class="insight-list">${top.length ? top.map(card).join('') : '<p class="fine">Noch keine auffälligen Muster.</p>'}</div>`;
 }
 
-export function insightsPage(ins: Insights): string {
+/** Steckbrief einer Linie (Strecke, Betreiber, Befunde), liefert die App aus dem Fahrplan. */
+export type LineInfo = (line: string, ins: Insights) => string;
+
+export function insightsPage(ins: Insights, lineInfo?: LineInfo): string {
   const total = ins.sources.sections + ins.sources.dwell + ins.sources.origins + ins.sources.imports || 1;
   const sources = [
     { label: 'Unterwegs zwischen Halten', v: ins.sources.sections, c: '#8b95b8' },
@@ -75,7 +78,8 @@ export function insightsPage(ins: Insights): string {
     if (!list.length) return '';
     return `<section class="card"><h3>${g.title}</h3><p class="fine" style="margin:-4px 0 12px">${g.lead}</p><div class="insight-list">${list.map(card).join('')}</div></section>`;
   }).join('');
-  const worstLines = ins.lines.slice(0, 8);
+  // Schlechteste zuerst (der Server sortiert schon, ältere Antworten evtl. nicht)
+  const worstLines = [...ins.lines].sort((a, b) => a.punctuality - b.punctuality || b.arrivals - a.arrivals).slice(0, 10);
 
   return `
     <section class="hero-grade">
@@ -104,9 +108,14 @@ export function insightsPage(ins: Insights): string {
 
     ${
       worstLines.length
-        ? `<section class="card"><h3>Linien mit der niedrigsten Pünktlichkeit</h3><table class="table">${worstLines
-            .map((l) => `<tr><td>${esc(l.line)}<span class="sub">${fmtInt(l.arrivals)} Ankünfte</span></td><td class="num">${fmtPct(l.punctuality, 0)}</td></tr>`)
-            .join('')}</table></section>`
+        ? `<section class="card"><h3>Linien mit der niedrigsten Pünktlichkeit</h3><p class="fine" style="margin:-4px 0 10px">Von schlecht nach gut. Tippe auf eine Linie für Strecke, Betreiber und wo sie Zeit verliert.</p><div class="line-list">${worstLines
+            .map(
+              (l, k) => `<details class="line-item">
+                <summary><span class="line-rank">${k + 1}</span><span class="line-name">${esc(l.line)}<span class="sub">${fmtInt(l.arrivals)} Ankünfte</span></span><span class="line-bar"><span style="width:${(l.punctuality * 100).toFixed(1)}%;--c:${l.punctuality >= 0.8 ? 'var(--ok)' : l.punctuality >= 0.6 ? 'var(--warn)' : l.punctuality >= 0.4 ? 'var(--late)' : 'var(--bad)'}"></span></span><span class="num">${fmtPct(l.punctuality, 0)}</span></summary>
+                <div class="line-info">${lineInfo ? lineInfo(l.line, ins) : ''}</div>
+              </details>`,
+            )
+            .join('')}</div></section>`
         : ''
     }
 

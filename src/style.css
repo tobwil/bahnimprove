@@ -1,3 +1,14 @@
+/* Pixelschrift für Zahlen und Marken: Jersey 10 (klare 5/S, 9, 3), etwas größer gesetzt,
+   damit sie die gleiche Höhe wie die frühere Pixelify Sans erreicht */
+@font-face {
+  font-family: 'Bahn Pixel';
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  size-adjust: 118%;
+  src: url('../node_modules/@fontsource/jersey-10/files/jersey-10-latin-400-normal.woff2') format('woff2');
+}
+
 /* Nacht-Leitstand: Vollbild-Pixelkarte als Bühne, Bedienung im Bottom-Sheet (Desktop: rechte Spalte).
    Pixel-Schriften nur für Zahlen und Marken, Fließtext in Geist. */
 :root {
@@ -19,7 +30,7 @@
   --nodata: #6b7597;
   --glass: rgba(10, 14, 28, 0.78);
 
-  --f-display: 'Pixelify Sans', 'Silkscreen', ui-monospace, monospace;
+  --f-display: 'Bahn Pixel', 'Silkscreen', ui-monospace, monospace;
   --f-micro: 'Silkscreen', ui-monospace, monospace;
   --f-body: 'Geist Sans', 'Geist', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
   --f-mono: 'Geist Mono', ui-monospace, 'SFMono-Regular', Menlo, monospace;
@@ -36,6 +47,7 @@
 
 html,
 body {
+  font-synthesis: none;
   margin: 0;
   height: 100%;
   overflow: hidden;
@@ -1146,7 +1158,9 @@ button {
   align-items: center;
   max-width: 760px;
   margin: 0 auto;
-  padding: 6px 0 12px;
+  padding: 10px 12px 12px 16px;
+  border-radius: 0 0 16px 16px;
+  column-gap: 12px;
 }
 
 .report-head .eyebrow {
@@ -1795,6 +1809,273 @@ a.ghost-btn {
   font-size: 14px;
 }
 
+/* ---------- Ebenen: Filter und Legende ---------- */
+.tool-btn.is-active {
+  color: var(--lamp);
+  border-color: color-mix(in srgb, var(--lamp) 60%, transparent);
+}
+
+@media (pointer: coarse) {
+  /* Auf Touch-Geräten zoomt man mit zwei Fingern */
+  .tool-btn--zoom {
+    display: none;
+  }
+}
+
+.layers {
+  position: absolute;
+  z-index: 7;
+  top: calc(env(safe-area-inset-top, 0px) + 72px);
+  right: calc(var(--gutter-r) + 46px);
+  width: min(300px, calc(100% - var(--gutter) - var(--gutter-r) - 46px));
+  max-height: calc(100% - env(safe-area-inset-top, 0px) - 72px - var(--sheet-peek) - var(--nav-h, 0px) - 12px);
+  overflow-y: auto;
+  display: grid;
+  gap: 14px;
+  padding: 14px;
+  border-radius: 16px;
+  background: rgba(10, 14, 28, 0.96);
+  border: 1px solid var(--line-hi);
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  font-size: 13px;
+  animation: fade-in 0.15s ease-out;
+}
+
+.layers-group {
+  display: grid;
+  gap: 8px;
+}
+
+.layers .seg {
+  justify-self: start;
+}
+
+.layers .chips {
+  margin: 0;
+}
+
+.legend {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+  color: var(--muted);
+}
+
+.legend li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.legend b {
+  color: #4aa8ff;
+  font-family: var(--f-display);
+}
+
+.legend i {
+  width: 8px;
+  height: 8px;
+  flex-shrink: 0;
+  background: var(--c);
+  box-shadow: 0 0 6px var(--c);
+}
+
+.legend i.is-ring {
+  width: 10px;
+  height: 10px;
+  background: none;
+  border: 2px solid var(--c);
+  border-radius: 50%;
+}
+
+/* ---------- Wiedergabe statt Live ---------- */
+.replay-bar {
+  position: absolute;
+  z-index: 4;
+  top: calc(env(safe-area-inset-top, 0px) + 66px);
+  left: var(--gutter);
+  max-width: calc(100% - var(--gutter) - var(--gutter-r) - 50px);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 5px 5px 5px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 16%, rgba(10, 14, 28, 0.92));
+  border: 1px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  animation: fade-in 0.2s ease-out;
+}
+
+.round-btn--small {
+  width: 32px;
+  height: 32px;
+}
+
+.replay-text {
+  display: grid;
+  line-height: 1.1;
+  min-width: 0;
+  padding-right: 2px;
+}
+
+.replay-text .eyebrow {
+  color: var(--accent);
+}
+
+.replay-text b {
+  font-weight: 600;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.live-btn {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: 32px;
+  padding: 0 12px;
+  border-radius: 999px;
+  border-color: color-mix(in srgb, var(--bad) 60%, transparent);
+  background: color-mix(in srgb, var(--bad) 18%, var(--ink-1));
+  font-weight: 600;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.timeline-btn {
+  font-family: var(--f-body);
+  font-weight: 500;
+  font-size: 13px;
+}
+
+.timeline-btn.is-live {
+  color: var(--text);
+  border-color: color-mix(in srgb, var(--bad) 60%, transparent);
+  background: color-mix(in srgb, var(--bad) 18%, var(--ink-1));
+}
+
+.clock-chip.is-replay {
+  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+}
+
+/* Überschrift je Ansicht (nur Handy, am Desktop zeigen die Reiter, wo man ist) */
+.view-title {
+  display: none;
+}
+
+/* ---------- Linien-Steckbriefe (Analyse) ---------- */
+.line-list {
+  display: grid;
+}
+
+.line-item {
+  border-top: 1px solid var(--line);
+}
+
+.line-item summary {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) 70px 40px;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 0;
+  cursor: pointer;
+  list-style: none;
+}
+
+.line-item summary::-webkit-details-marker {
+  display: none;
+}
+
+.line-item[open] summary {
+  color: var(--lamp);
+}
+
+.line-rank {
+  font-family: var(--f-display);
+  font-size: 15px;
+  color: var(--dim);
+}
+
+.line-name {
+  display: grid;
+  font-weight: 600;
+  min-width: 0;
+}
+
+.line-name .sub {
+  font-weight: 400;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.line-bar {
+  height: 6px;
+  background: var(--ink-3);
+}
+
+.line-bar span {
+  display: block;
+  height: 100%;
+  background: var(--c);
+}
+
+.line-item .num {
+  text-align: right;
+  font-family: var(--f-display);
+  font-size: 18px;
+}
+
+.line-info {
+  padding: 0 0 14px 32px;
+  font-size: 14px;
+}
+
+.line-route {
+  margin: 0 0 10px;
+}
+
+.line-route .sub,
+.line-related {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.line-facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 14px;
+  margin: 0 0 6px;
+}
+
+.line-facts dt {
+  font-family: var(--f-micro);
+  font-size: 8px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+
+.line-facts dd {
+  margin: 2px 0 0;
+}
+
+.line-related {
+  margin: 0 0 12px;
+  padding-left: 16px;
+  display: grid;
+  gap: 6px;
+}
+
+.line-related b {
+  color: var(--text);
+}
+
 /* ---------- App-Navigation unten (Handy) ---------- */
 .appnav {
   display: none;
@@ -1872,6 +2153,21 @@ a.ghost-btn {
 
   .tabs {
     display: none;
+  }
+
+  .view-title {
+    display: block;
+    margin: 4px 0 12px;
+    font-family: var(--f-display);
+    font-weight: 400;
+    font-size: 22px;
+    line-height: 1.1;
+    color: var(--text);
+  }
+
+  /* Eingeklappt nur die Kernaussage; Kennzahlen und Zeitleiste beim Hochziehen */
+  :root {
+    --sheet-peek: 96px;
   }
 
   .toast {
