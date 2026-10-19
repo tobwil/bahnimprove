@@ -12,7 +12,7 @@ import { ArrivalIndex, activeIncidents as simIncidents, hotspotsAt, hourlyPunctu
 import { buildDayModel, type DayModel } from './sim/model.ts';
 import { observedResult, type ObservedStats } from './sim/real.ts';
 import { RegionalLayer } from './regional/layer.ts';
-import { tilesAround, tilesInBounds } from './data/regional.ts';
+import { tileKey, tilesAround, tilesInBounds } from './data/regional.ts';
 import type { RealtimeDay } from './realtime/types.ts';
 import { causeText, fmtDelay, hhmm, shortName, tripLabel } from './sim/text.ts';
 import type { SimResult, Timetable } from './sim/types.ts';
@@ -26,7 +26,7 @@ import { Timeline } from './ui/timeline.ts';
 import { emptyRow, hotspotRow, incidentRow, journeyCard, journeyVerdict, departureBoard, followCard, searchHitRow, sharePanel, stationRow, trainDetail, trainRow, type Buildup } from './ui/views.ts';
 import { aggregateDay, findings, mergeDays, type Insights } from './insights/aggregate.ts';
 import { searchJourneys, type JourneyResult } from './sim/journey.ts';
-import { matchStations, search } from './sim/search.ts';
+import { lineMatches, lineQuery, matchStations, search, searchWords, type LineQuery } from './sim/search.ts';
 import { insightsPage, insightsTeaser } from './ui/insights.ts';
 import { aboutPage, imprintPage, privacyPage } from './ui/about.ts';
 import { boardIndexOf, cleanName, co2Line, followStatus, isPain, targetIndexOf } from './share/status.ts';
@@ -678,6 +678,26 @@ async function main() {
 
   // --- Suche -------------------------------------------------------------------
   let searchLoaded: number | undefined;
+  let searchLine: string | null = null;
+  let lineLoading = false;
+  let lineTimer: ReturnType<typeof setTimeout> | undefined;
+  /** Kacheln einer Linie laden, die nächsten zum Standort bzw. zur Kartenmitte zuerst (höchstens 24) */
+  async function loadLine(line: LineQuery): Promise<boolean> {
+    lineLoading = true;
+    try {
+      const tiles = await state.day.regional.tilesForLine((k) => lineMatches(k, line));
+      if (!tiles.length) return false;
+      const [lon, lat] = state.user ? [state.user.lon, state.user.lat] : map.unproject(map.w / 2, map.h / 2);
+      const [ty, tx] = tileKey(lat, lon).split('_').map(Number);
+      const dist = (k: string) => {
+        const [y, x] = k.split('_').map(Number);
+        return Math.hypot(y - ty, x - tx);
+      };
+      return await state.day.regional.ensure(tiles.sort((a, b) => dist(a) - dist(b)).slice(0, 24));
+    } finally {
+      lineLoading = false;
+    }
+  }
   function renderSearch(force = false) {
     const { model: m, result: r } = net();
     const q = $<HTMLInputElement>('search').value;
@@ -693,8 +713,19 @@ async function main() {
       const st = m.stations[top];
       void loadAround(st.lat, st.lon, 0).then((changed) => changed && renderSearch(true));
     }
+    // Regionallinien ("RE 19") liegen nur für geladene Gegenden vor: Kacheln der Linie nachladen
+    const line = lineQuery(searchWords(q));
+    const lineKeyQ = line && `${state.day.regional.date}|${line.cat ?? ''}${line.no}`;
+    if (line && searchLine !== lineKeyQ) {
+      // kurz warten, damit beim Tippen von "RE19" nicht erst alle "RE1" geladen werden
+      searchLine = lineKeyQ;
+      lineLoading = true;
+      clearTimeout(lineTimer);
+      lineTimer = setTimeout(() => void loadLine(line).then(() => searchLine === lineKeyQ && renderSearch(true)), 350);
+    }
     const html = res.stations.map((st) => stationRow(m, st)).join('') + res.trips.map((h) => searchHitRow(m, r, h)).join('');
-    setHtml('search-results', html || emptyRow('Nichts gefunden. Tipp: Bahnhofsname ohne „Hbf“ oder nur die Liniennummer.'), force);
+    if (!html && line && lineLoading) setHtml('search-results', emptyRow('Suche Regionalzüge …'), force);
+    else setHtml('search-results', html || emptyRow('Nichts gefunden. Tipp: Bahnhofsname ohne „Hbf“ oder nur die Liniennummer.'), force);
   }
 
   // --- Standort ----------------------------------------------------------------

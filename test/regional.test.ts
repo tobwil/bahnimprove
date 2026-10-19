@@ -41,6 +41,8 @@ describe('GTFS-Aufbereitung', () => {
     const tile = b.regional!.tiles.get(`20261019/${tileKey(50.26, 10.96)}`)!;
     expect(tile.trips[0].stops).toEqual([names.indexOf('Coburg'), bamberg]);
     expect(b.regional!.tripTiles.R1.length).toBeGreaterThanOrEqual(1);
+    // Linienindex: Suche nach "RE 29" findet die Kachel, in der die Fahrt beginnt
+    expect(b.regional!.index.lines).toEqual({ re29: [tileKey(50.26, 10.96)] });
     expect(b.timetable.stations[names.indexOf('Coburg')].w).toBeGreaterThan(0);
     expect(b.timetable.stations[names.indexOf('Coburg')].weight).toBe(0);
   });

@@ -3,7 +3,7 @@
  * Start und Ziel einer Reise), hält sie mit Echtzeitdaten aktuell und führt sie mit dem
  * Fernverkehr zu einem gemeinsamen Netz zusammen.
  */
-import type { RegionalTile } from '../data/regional.ts';
+import type { RegionalIndex, RegionalTile } from '../data/regional.ts';
 import type { RealtimeDay } from '../realtime/types.ts';
 import { categoryOf, type DayModel } from '../sim/model.ts';
 import { berlinMidnightEpoch, observeTrip } from '../sim/real.ts';
@@ -66,6 +66,15 @@ export class RegionalLayer {
     );
     if (this.rev !== before) this.onChange?.();
     return this.rev !== before;
+  }
+
+  private lines?: Promise<Record<string, string[]> | null>;
+  /** Kacheln, in denen Fahrten der passenden Linien beginnen (Linienindex des nächtlichen Jobs) */
+  async tilesForLine(match: (key: string) => boolean): Promise<string[]> {
+    this.lines ??= fetchLineIndex();
+    const lines = await this.lines;
+    if (!lines) return [];
+    return [...new Set(Object.entries(lines).flatMap(([k, tiles]) => (match(k) ? tiles : [])))];
   }
 
   /** Alle geladenen Kacheln auffrischen (Echtzeit). */
@@ -155,6 +164,19 @@ export class RegionalLayer {
   stationsCount() {
     return this.stations.length;
   }
+}
+
+async function fetchLineIndex(): Promise<Record<string, string[]> | null> {
+  // Server (nächtlicher Job), lokal die statische Datei
+  for (const url of ['api/static/rv-index', 'data/rv/index.json']) {
+    try {
+      const r = await fetch(url);
+      if (r.ok && r.headers.get('content-type')?.includes('json')) return ((await r.json()) as RegionalIndex).lines ?? null;
+    } catch {
+      // nächste Quelle
+    }
+  }
+  return null;
 }
 
 function emptyTile(tile: string, date: string): RegionalTile & { rt: null } {

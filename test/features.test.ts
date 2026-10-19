@@ -5,7 +5,7 @@ import { defaultPolicy, simulate } from '../src/sim/engine.ts';
 import { searchJourneys, transferProbability } from '../src/sim/journey.ts';
 import { buildDayModel } from '../src/sim/model.ts';
 import { observedResult } from '../src/sim/real.ts';
-import { fold, matchStations, search } from '../src/sim/search.ts';
+import { fold, lineMatches, lineQuery, matchStations, search, searchWords } from '../src/sim/search.ts';
 import type { RealtimeDay } from '../src/realtime/types.ts';
 import type { Timetable } from '../src/sim/types.ts';
 import { departureBoard } from '../src/ui/views.ts';
@@ -128,5 +128,20 @@ describe('Abfahrtstafel', () => {
   it('zeigt Ankünfte mit Herkunft', () => {
     const html = departureBoard(m, r, koeln, 600, { mode: 'arr', live: false });
     expect(html).toContain('<small>von </small>');
+  });
+});
+
+describe('Liniensuche', () => {
+  it('erkennt Linien und gleicht sie mit dem Linienindex ab', () => {
+    const q = lineQuery(searchWords('RE19'))!;
+    expect(q).toMatchObject({ cat: 're', no: '19' });
+    expect(lineMatches('re19', q)).toBe(true);
+    expect(lineMatches('re1', q)).toBe(false);
+    expect(lineMatches('rb19', q)).toBe(false);
+    const n = lineQuery(searchWords('19 Coburg'))!;
+    expect(n.rest).toEqual(['coburg']);
+    expect(lineMatches('rb19', n)).toBe(true);
+    expect(lineMatches('re119', n)).toBe(false);
+    expect(lineQuery(searchWords('Coburg'))).toBeNull();
   });
 });
