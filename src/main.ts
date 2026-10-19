@@ -820,9 +820,10 @@ async function main() {
     const m = state.day.model;
     const chips: { i: number; meta: string }[] = [];
     const add = (i: number | undefined, meta = '') => i !== undefined && !chips.some((c) => c.i === i) && chips.push({ i, meta });
-    if (state.user) for (const x of nearestStations(state.user, 2)) add(x.i, x.d < 1 ? `${Math.round(x.d * 1000)} m` : `${x.d.toFixed(1).replace('.', ',')} km`);
-    for (const name of loadRecent()) add(stationByName(name));
-    if (chips.length < 3) for (const name of BIG_STATIONS) chips.length < 5 && add(stationByName(name));
+    if (state.user) for (const x of nearestStations(state.user, 3)) add(x.i, x.d < 1 ? `${Math.round(x.d * 1000)} m` : `${x.d.toFixed(1).replace('.', ',')} km`);
+    for (const name of loadRecent()) add(stationByName(name), 'zuletzt');
+    // Große Bahnhöfe nur als Einstieg, solange es weder Standort noch Verlauf gibt – sonst wirken sie wie „in der Nähe“
+    if (!chips.length) for (const name of BIG_STATIONS) add(stationByName(name));
     const locate = state.user ? '' : `<button class="chip" data-locate>◎ In meiner Nähe</button>`;
     setHtml(
       'board-chips',
