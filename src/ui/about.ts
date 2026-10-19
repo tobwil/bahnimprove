@@ -9,8 +9,8 @@ export function aboutPage(): string {
     <section class="card">
       <h3>Datenquellen</h3>
       <table class="table">
-        <tr><td>Fahrpläne Fern- und Regionalverkehr<span class="sub">gtfs.de, Daten von DELFI e.V.</span></td><td class="num">CC BY 4.0</td></tr>
-        <tr><td>Echtzeit (Verspätungen, Prognosen, Ausfälle)<span class="sub">GTFS-Realtime von gtfs.de</span></td><td class="num">CC BY-SA 4.0</td></tr>
+        <tr><td>Fahrpläne Fern- und Regionalverkehr<span class="sub"><a href="https://gtfs.de/de/feeds/de_fv/" target="_blank" rel="noopener">gtfs.de</a>, Daten von DELFI e.V.</span></td><td class="num"><a href="https://creativecommons.org/licenses/by/4.0/deed.de" target="_blank" rel="noopener">CC BY 4.0</a></td></tr>
+        <tr><td>Echtzeit (Verspätungen, Prognosen, Ausfälle)<span class="sub">GTFS-Realtime von <a href="https://gtfs.de/de/realtime/" target="_blank" rel="noopener">gtfs.de</a>, unverändert abgerufen und für Karte, Tafeln und Auswertungen aufbereitet</span></td><td class="num"><a href="https://creativecommons.org/licenses/by-sa/4.0/deed.de" target="_blank" rel="noopener">CC BY-SA 4.0</a></td></tr>
         <tr><td>Verspätungsgründe an großen Bahnhöfen<span class="sub">IRIS-Schnittstelle der Deutschen Bahn</span></td><td class="num">DB</td></tr>
         <tr><td>Landesgrenzen<span class="sub">Natural Earth</span></td><td class="num">gemeinfrei</td></tr>
       </table>
