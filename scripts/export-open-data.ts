@@ -2,13 +2,13 @@
  * Holt die verdichteten Tageswerte und Befunde von der Live-Seite und legt sie als offene Daten
  * im Repo ab (zugleich Sicherung, falls Server-Daten verloren gehen).
  *
- *   SITE=https://bahnimprove-leitstand.netlify.app npx tsx scripts/export-open-data.ts
+ *   SITE=https://sharemytrain.de npx tsx scripts/export-open-data.ts
  */
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import type { Insights } from '../src/insights/aggregate.ts';
 import { reasonText } from '../src/insights/reasons.ts';
 
-const SITE = process.env.SITE ?? 'https://bahnimprove-leitstand.netlify.app';
+const SITE = process.env.SITE ?? 'https://sharemytrain.de';
 const DIR = 'open-data';
 
 const get = async <T>(path: string): Promise<T> => {
@@ -16,6 +16,23 @@ const get = async <T>(path: string): Promise<T> => {
   if (!res.ok) throw new Error(`${path}: HTTP ${res.status}`);
   return (await res.json()) as T;
 };
+
+/** Laufender Verkehrstag (YYYYMMDD) in Berlin; bis 03:00 zählt noch der Vortag. */
+function serviceDate(now = new Date()): string {
+  const berlin = new Date(now.toLocaleString('en-US', { timeZone: 'Europe/Berlin' }));
+  if (berlin.getHours() < 3) berlin.setDate(berlin.getDate() - 1);
+  return `${berlin.getFullYear()}${String(berlin.getMonth() + 1).padStart(2, '0')}${String(berlin.getDate()).padStart(2, '0')}`;
+}
+
+/** Datei vorhanden und vollständig (mit Tagesverdichtung)? */
+function complete(file: string): boolean {
+  if (!existsSync(file)) return false;
+  try {
+    return JSON.parse(readFileSync(file, 'utf8')).aggregate != null;
+  } catch {
+    return false;
+  }
+}
 
 /** ISO-Kalenderwoche "2026-W43" */
 function isoWeek(d = new Date()): string {
@@ -34,9 +51,11 @@ async function main() {
   mkdirSync(`${DIR}/berichte`, { recursive: true });
   const index = await get<{ days: string[]; reasons: string[] }>('/api/open-data');
   let added = 0;
+  // Nur abgeschlossene Tage sichern; unvollständige Dateien beim nächsten Lauf ersetzen
+  const today = serviceDate();
   for (const date of new Set([...index.days, ...index.reasons])) {
     const file = `${DIR}/tage/${date}.json`;
-    if (existsSync(file)) continue;
+    if (date >= today || complete(file)) continue;
     writeFileSync(file, JSON.stringify(await get(`/api/open-data?date=${date}`)));
     added++;
   }
@@ -56,7 +75,7 @@ async function main() {
   const rTotal = Object.values(ins.reasons?.total ?? {}).reduce((a, b) => a + b, 0) || 1;
   const md = `# Share my Train · Wochenbericht ${week}
 
-Aus ${ins.dates.length} Tagen echter Ist-Daten (${ins.dates[0] ?? '–'} bis ${ins.dates[ins.dates.length - 1] ?? '–'}), ${ins.trips} Fernverkehrsfahrten, ${ins.arrivals} beobachtete Ankünfte.
+Aus ${ins.dates.length === 1 ? '1 Tag' : `${ins.dates.length} Tagen`} echter Ist-Daten (${ins.dates[0] ?? '–'} bis ${ins.dates[ins.dates.length - 1] ?? '–'}), ${ins.trips} Fernverkehrsfahrten, ${ins.arrivals} beobachtete Ankünfte.
 Pünktlichkeit (Ankünfte unter 6 Minuten Verspätung): **${(ins.punctuality * 100).toFixed(1)} %**.
 
 Live: ${SITE}/bericht
