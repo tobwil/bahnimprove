@@ -47,7 +47,7 @@ describe('Live mitfahren', () => {
     expect(followHeadline(st)).toContain('fällt aus');
   });
 
-  it('Share your Train, ab großer Verspätung Train Pain', () => {
+  it('Share my Train, ab großer Verspätung Train Pain', () => {
     expect(isPain(PAIN_MIN - 1)).toBe(false);
     expect(isPain(PAIN_MIN)).toBe(true);
     expect(isPain(0, true)).toBe(true);

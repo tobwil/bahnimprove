@@ -344,11 +344,11 @@ export function journeyVerdict(m: DayModel, res: JourneyResult): string {
   return `<div class="verdict"><strong>${esc(recText)} passt.</strong>Voraussichtliche Ankunft ${hhmm(rec.predArr)}.${esc(tr)}</div>`;
 }
 
-// --- Share your Train (Pain) ------------------------------------------------------
+// --- Share my Train (Pain) ---------------------------------------------------------
 
-/** "Share your Train" – bei großer Verspätung wird Train durchgestrichen und Pain kommt dazu */
+/** "Share my Train" – bei großer Verspätung wird Train durchgestrichen und Pain kommt dazu */
 export const shareBrand = (pain: boolean) =>
-  pain ? `<span class="brand is-pain">Share your <s>Train</s> <b>Pain</b></span>` : `<span class="brand">Share your <b>Train</b></span>`;
+  pain ? `<span class="brand is-pain">Share my <s>Train</s> <b>Pain</b></span>` : `<span class="brand">Share my <b>Train</b></span>`;
 
 /** Formular zum Teilen der eigenen Zugfahrt: Ausstieg wählen, Name optional. */
 export function sharePanel(m: DayModel, trip: number, fromStop: number, name: string, pain: boolean): string {

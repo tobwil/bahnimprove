@@ -54,7 +54,7 @@ async function main() {
   const top = ins.findings.filter((f) => f.kind !== 'reserve').slice(0, 10);
   const reasons = Object.entries(ins.reasons?.total ?? {}).sort((a, b) => b[1] - a[1]).slice(0, 8);
   const rTotal = Object.values(ins.reasons?.total ?? {}).reduce((a, b) => a + b, 0) || 1;
-  const md = `# Bahnimprove Wochenbericht ${week}
+  const md = `# Share my Train · Wochenbericht ${week}
 
 Aus ${ins.dates.length} Tagen echter Ist-Daten (${ins.dates[0] ?? '–'} bis ${ins.dates[ins.dates.length - 1] ?? '–'}), ${ins.trips} Fernverkehrsfahrten, ${ins.arrivals} beobachtete Ankünfte.
 Pünktlichkeit (Ankünfte unter 6 Minuten Verspätung): **${(ins.punctuality * 100).toFixed(1)} %**.
@@ -74,7 +74,7 @@ ${reasons.map(([c, n]) => `- ${reasonText(+c)}: ${Math.round((n / rTotal) * 100)
 ## Methode
 
 Nur beobachtete Ist-Zeiten (keine Prognosen). Ein Befund ist *belastbar* ab 40 Fällen aus mindestens 7 Tagen, wenn er an der Mehrzahl der Tage auftritt.
-Fahrplan: DELFI e.V./gtfs.de (CC BY 4.0), Echtzeit: gtfs.de (CC BY-SA 4.0), Verspätungsgründe: IRIS-Schnittstelle der Deutschen Bahn. Diese Auswertung: CC BY-SA 4.0, Bahnimprove.
+Fahrplan: DELFI e.V./gtfs.de (CC BY 4.0), Echtzeit: gtfs.de (CC BY-SA 4.0), Verspätungsgründe: IRIS-Schnittstelle der Deutschen Bahn. Diese Auswertung: CC BY-SA 4.0, Share my Train (sharemytrain.de).
 `;
   writeFileSync(`${DIR}/berichte/${week}.md`, md);
   console.log(`${added} neue Tage, ${ins.findings.length} Befunde, Bericht ${week}`);

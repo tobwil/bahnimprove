@@ -49,11 +49,11 @@ function fit(s: string, maxW: number, scale: number): string {
 
 export function renderCard(st: FollowStatus, opts: { name?: string; stamp: number }): Uint32Array {
   const buf = new Uint32Array(CARD_W * CARD_H).fill(C.bg);
-  // Kopf: "SHARE YOUR TRAIN" – bei großer Verspätung "SHARE YOUR T̶R̶A̶I̶N̶ PAIN"
+  // Kopf: "SHARE MY TRAIN" – bei großer Verspätung "SHARE MY T̶R̶A̶I̶N̶ PAIN"
   const pain = isPain(st.delay, st.state === 'canceled');
   let bx = 10;
-  text(buf, bx, 5, 'SHARE YOUR', C.muted, 2);
-  bx += (textWidth('SHARE YOUR ') + 1) * 2;
+  text(buf, bx, 5, 'SHARE MY', C.muted, 2);
+  bx += (textWidth('SHARE MY ') + 1) * 2;
   text(buf, bx, 5, 'TRAIN', pain ? C.dim : C.lamp, 2);
   if (pain) {
     rect(buf, bx - 2, 9, (textWidth('TRAIN') + 2) * 2, 2, C.live);
@@ -103,7 +103,7 @@ export function renderCard(st: FollowStatus, opts: { name?: string; stamp: numbe
     const co2 = pain ? `PAIN IS TEMPORARY - CO2 REDUCTION IS FOREVER (${kg} KG)` : `${kg} KG CO2 WENIGER ALS MIT DEM AUTO`;
     text(buf, 10, CARD_H - 11, co2, C.ok);
   } else text(buf, 10, CARD_H - 11, `STAND ${hhmm(opts.stamp)} - LINK ZEIGT DIE FAHRT LIVE`, C.dim);
-  text(buf, CARD_W - 10 - textWidth('BAHNIMPROVE'), CARD_H - 11, 'BAHNIMPROVE', C.lamp);
+  text(buf, CARD_W - 10 - textWidth('SHAREMYTRAIN.DE'), CARD_H - 11, 'SHAREMYTRAIN.DE', C.lamp);
   return buf;
 }
 

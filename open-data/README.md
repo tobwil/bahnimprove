@@ -1,4 +1,4 @@
-# Offene Daten von Bahnimprove
+# Offene Daten von Share my Train
 
 Hier legt eine GitHub Action jede Woche die verdichteten Daten der Live-Seite ab. Die Ablage dient als offene Daten zum Nachprüfen und zugleich als Sicherung.
 
@@ -12,6 +12,6 @@ Histogramme (`hist`) zählen Abweichungen in ganzen Minuten von −10 (Index 0) 
 
 ## Lizenz
 
-[CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/deed.de), weil sie aus dem Echtzeit-Feed von gtfs.de (CC BY-SA 4.0) abgeleitet sind. Quellenangabe: „Bahnimprove, Daten: DELFI e.V./gtfs.de, Deutsche Bahn (IRIS)“.
+[CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/deed.de), weil sie aus dem Echtzeit-Feed von gtfs.de (CC BY-SA 4.0) abgeleitet sind. Quellenangabe: „Share my Train (sharemytrain.de), Daten: DELFI e.V./gtfs.de, Deutsche Bahn (IRIS)“.
 
 Die Rohdaten stammen von [gtfs.de](https://gtfs.de): Fahrpläne der DELFI e.V. (CC BY 4.0) und der GTFS-Realtime-Feed (CC BY-SA 4.0). Verspätungsgründe kommen aus der öffentlichen IRIS-Schnittstelle der Deutschen Bahn.

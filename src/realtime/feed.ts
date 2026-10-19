@@ -12,7 +12,7 @@ const TRIP_CANCELED = 3;
 const STOP_SKIPPED = 1;
 
 export async function fetchFeed(url = FEED_URL): Promise<Uint8Array> {
-  const res = await fetch(url, { headers: { 'User-Agent': 'bahnimprove (https://github.com/tobwil/bahnimprove)' } });
+  const res = await fetch(url, { headers: { 'User-Agent': 'sharemytrain.de (https://github.com/tobwil/bahnimprove)' } });
   if (!res.ok) throw new Error(`Echtzeit-Feed: HTTP ${res.status}`);
   return new Uint8Array(await res.arrayBuffer());
 }

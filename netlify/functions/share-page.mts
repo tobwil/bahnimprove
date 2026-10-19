@@ -16,7 +16,7 @@ export default async (req: Request) => {
   const [, date, rawId] = m;
   const id = decodeURIComponent(rawId);
   const who = cleanName(url.searchParams.get('von'));
-  let title = 'Share your Train';
+  let title = 'Share my Train';
   let description = 'Wo der Zug gerade ist und wann er ankommt, live aus den Echtzeitdaten.';
   try {
     const found = await tripWithRealtime(date, id, url.searchParams.get('k') ?? undefined);
@@ -41,7 +41,7 @@ export default async (req: Request) => {
   const meta = `<meta property="og:title" content="${esc(title)}" />
     <meta property="og:description" content="${esc(description)}" />
     <meta property="og:type" content="website" />
-    <meta property="og:site_name" content="Share your Train" />
+    <meta property="og:site_name" content="Share my Train" />
     <meta property="og:url" content="${esc(url.toString())}" />
     <meta property="og:image" content="${esc(img.toString())}" />
     <meta property="og:image:width" content="1200" />

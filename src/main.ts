@@ -593,7 +593,7 @@ async function main() {
     }
     if (navigator.share) {
       try {
-        await navigator.share({ title: pain ? 'Share your Train Pain' : 'Share your Train', text, url });
+        await navigator.share({ title: pain ? 'Share my Train Pain' : 'Share my Train', text, url });
         result.textContent = 'Geteilt. Der Link zeigt die Fahrt bis zur Ankunft live.';
         return;
       } catch (e) {
@@ -1037,7 +1037,7 @@ async function main() {
   };
   $('open-insights').addEventListener('click', openInsights);
   $('open-about').addEventListener('click', () => {
-    $('report-eyebrow').textContent = 'Bahnimprove';
+    $('report-eyebrow').textContent = 'Share my Train';
     $('report-title').textContent = 'Über, Daten & Datenschutz';
     $('report-share').hidden = true;
     overlay.hidden = false;
@@ -1048,7 +1048,7 @@ async function main() {
     const url = new URL(location.href);
     url.pathname = url.pathname.replace(/\/(bericht\/?)?$/, '/bericht');
     url.hash = '';
-    const data = { title: 'Was die DB lernen kann – Bahnimprove', text: 'Lessons learned für die Bahn aus echten Ist-Daten', url: url.toString() };
+    const data = { title: 'Was die DB lernen kann – Share my Train', text: 'Lessons learned für die Bahn aus echten Ist-Daten', url: url.toString() };
     try {
       if (navigator.share) await navigator.share(data);
       else {

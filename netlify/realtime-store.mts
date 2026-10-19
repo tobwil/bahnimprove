@@ -146,7 +146,7 @@ export async function collectReasons(): Promise<{ date: string; added: number; f
     await Promise.all(
       list.slice(i, i + 8).map(async (s) => {
         try {
-          const res = await fetch(IRIS_FCHG + s.eva, { headers: { 'User-Agent': 'bahnimprove (https://github.com/tobwil/bahnimprove)' } });
+          const res = await fetch(IRIS_FCHG + s.eva, { headers: { 'User-Agent': 'sharemytrain.de (https://github.com/tobwil/bahnimprove)' } });
           if (!res.ok) throw new Error(String(res.status));
           added += addMessages(day, s.name, parseIrisMessages(await res.text()));
         } catch {

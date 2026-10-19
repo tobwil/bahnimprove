@@ -1,8 +1,8 @@
-# Bahnimprove · Leitstand
+# Share my Train
 
 Unabhängiges Hobby- und Civic-Tech-Projekt: **alle Züge in Deutschland** (Fern- und Regionalverkehr, S-Bahn) live auf einer Pixelkarte mit echten Verspätungen. Dazu gibt es eine Verbindungssuche mit Umstiegsprognose für Fahrgäste und offene **Lessons learned für die Bahn** aus beobachteten Ist-Daten.
 
-Live: https://bahnimprove-leitstand.netlify.app · Wochenbericht: https://bahnimprove-leitstand.netlify.app/bericht
+Live: https://sharemytrain.de (bis die Domain aufgeschaltet ist: https://bahnimprove-leitstand.netlify.app) · Wochenbericht: https://sharemytrain.de/bericht
 
 > **Echte Daten.** Soll-Fahrplan und Ist-Zeiten stammen aus den offenen Feeds von gtfs.de (DELFI e.V.): GTFS für den Fahrplan (~1.000 Fernverkehrsfahrten pro Tag), GTFS-Realtime für Verspätungen, Prognosen und Ausfälle. Eine Netlify Function sammelt den Feed alle 2 Minuten, damit der ganze Tag für den Tagesbericht vorliegt. Gibt es für einen Tag keine Echtzeitdaten, schaltet die App sichtbar auf eine Simulation um.
 
@@ -108,7 +108,7 @@ src/main.ts                  App, Zeitsteuerung, Seitenleiste
 ## Lizenzen
 
 - Code: [MIT](LICENSE)
-- Offene Daten in `open-data/` und unter `/api/*`: CC BY-SA 4.0 (abgeleitet aus dem Echtzeit-Feed unter CC BY-SA 4.0), Quellenangabe „Bahnimprove, Daten: DELFI e.V./gtfs.de, Deutsche Bahn (IRIS)“
+- Offene Daten in `open-data/` und unter `/api/*`: CC BY-SA 4.0 (abgeleitet aus dem Echtzeit-Feed unter CC BY-SA 4.0), Quellenangabe „Share my Train (sharemytrain.de), Daten: DELFI e.V./gtfs.de, Deutsche Bahn (IRIS)“
 
 ## Datenquellen & Lizenzen
 
