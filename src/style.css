@@ -2379,8 +2379,9 @@ a.ghost-btn {
     padding-top: 6px;
   }
 
+  /* Zug und Tafel: Platz für den Inhalt; Wiedergabe steuert die Leiste auf der Karte */
   .sheet.is-detail .timeline {
-    padding-top: 4px;
+    display: none;
   }
 
   /* Empfänger eines geteilten Links brauchen keine Zeitleiste */

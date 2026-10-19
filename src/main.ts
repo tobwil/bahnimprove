@@ -163,12 +163,16 @@ async function main() {
 
   const canvas = $<HTMLCanvasElement>('map');
   const map = new PixelMap(canvas, $<HTMLCanvasElement>('glow'), mapData, state.day.model);
-  const sheet = new Sheet($('sheet'), [$('sheet-grab'), document.querySelector<HTMLElement>('.status')!]);
-  const timeline = new Timeline($<HTMLCanvasElement>('strip'), (minute) => {
-    state.time = minute;
-    state.live = false;
-    syncControls();
-  });
+  const sheet = new Sheet($('sheet'), [$('sheet-grab'), document.querySelector<HTMLElement>('.status')!], $('sheet-body'));
+  const timeline = new Timeline(
+    $<HTMLCanvasElement>('strip'),
+    (minute) => {
+      state.time = minute;
+      state.live = false;
+      syncControls();
+    },
+    (e, startY) => sheet.takeOver(e, startY, $('strip')),
+  );
 
   /** Simulierte Störungen gibt es nur im Simulationsmodus. */
   const activeIncidents = (m: DayModel, t: number) => (state.day.mode === 'real' ? [] : simIncidents(m, t));

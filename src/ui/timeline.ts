@@ -10,20 +10,57 @@ export class Timeline {
   /** Bis hierhin sind Daten Vergangenheit (Live-Uhr); danach Prognose. */
   private nowMinute = Infinity;
 
-  constructor(private canvas: HTMLCanvasElement, onScrub: (minute: number) => void) {
+  /**
+   * Spulen nur bei waagrechtem Ziehen oder einem Tipp. Senkrechtes Wischen gehört dem Sheet
+   * (onVertical übernimmt die Geste), damit man beim Hoch- und Runterwischen nicht versehentlich spult.
+   */
+  constructor(
+    private canvas: HTMLCanvasElement,
+    onScrub: (minute: number) => void,
+    onVertical?: (e: PointerEvent, startY: number) => void,
+  ) {
     this.ctx = canvas.getContext('2d')!;
     const scrub = (e: PointerEvent) => {
       const r = canvas.getBoundingClientRect();
       const f = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width));
       onScrub(START + f * SPAN);
     };
+    let start: { x: number; y: number; id: number } | null = null;
+    let mode: 'scrub' | 'none' | null = null;
     canvas.addEventListener('pointerdown', (e) => {
-      canvas.setPointerCapture(e.pointerId);
-      scrub(e);
+      start = { x: e.clientX, y: e.clientY, id: e.pointerId };
+      mode = null;
+      // Maus: sofort spulen wie gewohnt
+      if (e.pointerType === 'mouse') {
+        mode = 'scrub';
+        canvas.setPointerCapture(e.pointerId);
+        scrub(e);
+      }
     });
     canvas.addEventListener('pointermove', (e) => {
-      if (canvas.hasPointerCapture(e.pointerId)) scrub(e);
+      if (!start || e.pointerId !== start.id) return;
+      if (mode === 'scrub') return scrub(e);
+      if (mode) return;
+      const dx = e.clientX - start.x, dy = e.clientY - start.y;
+      if (Math.hypot(dx, dy) < 8) return;
+      if (Math.abs(dx) > Math.abs(dy)) {
+        mode = 'scrub';
+        canvas.setPointerCapture(e.pointerId);
+        scrub(e);
+      } else {
+        mode = 'none';
+        onVertical?.(e, start.y);
+      }
     });
+    const end = (e: PointerEvent) => {
+      if (!start || e.pointerId !== start.id) return;
+      // Bewusster Tipp springt zur Uhrzeit
+      if (mode === null && e.type === 'pointerup') scrub(e);
+      start = null;
+      mode = null;
+    };
+    canvas.addEventListener('pointerup', end);
+    canvas.addEventListener('pointercancel', end);
   }
 
   setData(bins: { arrivals: number; punctual: number }[], nowMinute: number) {
