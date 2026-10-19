@@ -87,7 +87,8 @@ export function renderCard(st: FollowStatus, opts: { name?: string; stamp: numbe
   text(buf, x1 + 2 - textWidth(st.target), y + 7, st.target, C.muted);
 
   // Wo gerade
-  text(buf, 10, 126, fit(`JETZT: ${st.where}`, CARD_W - 20, 2).toUpperCase(), C.muted, 2);
+  const now = textWidth(`JETZT: ${st.where}`) * 2 <= CARD_W - 20 ? `JETZT: ${st.where}` : st.where;
+  text(buf, 10, 126, fit(now, CARD_W - 20, 2), C.muted, 2);
   text(buf, 10, CARD_H - 11, `STAND ${hhmm(opts.stamp)} - LINK ZEIGT DIE FAHRT LIVE`, C.dim);
   return buf;
 }
