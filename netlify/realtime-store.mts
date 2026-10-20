@@ -1,11 +1,12 @@
 import { getStore } from '@netlify/blobs';
 import bundledTimetable from '../public/data/timetable.json' with { type: 'json' };
 import irisStations from '../public/data/iris-stations.json' with { type: 'json' };
+import type { TripAlias } from '../src/data/alias.ts';
 import { addMessages, mergeReasons, parseIrisMessages, type ReasonDay } from '../src/insights/reasons.ts';
 import type { OverviewChunk, OverviewDelays, RegionalIndex, RegionalTile } from '../src/data/regional.ts';
 import { aggregateDay, findings, mergeDays, type DayAgg, type Insights } from '../src/insights/aggregate.ts';
 import { extractGroups, fetchFeed } from '../src/realtime/feed.ts';
-import { currentDelays, mergeDay, type RealtimeDay } from '../src/realtime/types.ts';
+import { currentDelays, mergeDay, renameTrips, type RealtimeDay } from '../src/realtime/types.ts';
 import { buildDayModel, categoryOf, type DayModel } from '../src/sim/model.ts';
 import { berlinMidnightEpoch, observeTrip, observedResult } from '../src/sim/real.ts';
 import type { Timetable, TimetableStation, Trip, TripResult } from '../src/sim/types.ts';
@@ -47,18 +48,33 @@ export async function rvTripTiles() {
   return rvCache;
 }
 
+let aliasCache: { at: number; alias: TripAlias } | null = null;
+/** Zuordnung alter trip_ids zu denen des aktuellen Fahrplans (vom nächtlichen Job, siehe src/data/alias.ts) */
+export async function fvAlias(): Promise<TripAlias> {
+  if (aliasCache && Date.now() - aliasCache.at < CACHE_MS) return aliasCache.alias;
+  const alias = ((await staticStore().get('fv-alias', { type: 'json' })) as TripAlias | null) ?? { dates: {} };
+  aliasCache = { at: Date.now(), alias };
+  return alias;
+}
+
 /** Feed abrufen und Fern- und Regionalverkehr in die Tagesdateien einarbeiten. */
 export async function collect(): Promise<RealtimeDay[]> {
-  const [tt, rv] = await Promise.all([timetable(), rvTripTiles()]);
+  const [tt, rv, alias] = await Promise.all([timetable(), rvTripTiles(), fvAlias()]);
   const fvIds = new Set(tt.trips.map((t) => t.id));
-  const { feedTime, groups } = extractGroups(await fetchFeed(), (id) => (fvIds.has(id) ? 'fv' : rv?.map[id] ? 'rv' : null));
+  const known = (id: string) => fvIds.has(id);
+  // Meldungen unter alten IDs (nach einem Fahrplanwechsel) gehören auch zum Fernverkehr
+  const anyAlias: TripAlias['dates'][string] = Object.assign({}, ...Object.values(alias.dates));
+  const { feedTime, groups } = extractGroups(await fetchFeed(), (id) => (fvIds.has(id) || (anyAlias[id] && fvIds.has(anyAlias[id][0])) ? 'fv' : rv?.map[id] ? 'rv' : null));
   const s = store();
   const days: RealtimeDay[] = [];
   for (const [group, byDate] of groups) {
     for (const [date, trips] of byDate) {
       const key = group === 'fv' ? date : `rv/${date}`;
       const prevText = await s.get(key, { type: 'text' });
+      if (group === 'fv') renameTrips(trips, alias.dates[date] ?? anyAlias, known);
       const day = mergeDay(prevText ? (JSON.parse(prevText) as RealtimeDay) : null, date, feedTime, trips);
+      // Schon gespeicherte Fahrten unter alten IDs mitnehmen
+      if (group === 'fv') renameTrips(day.trips, alias.dates[date], known);
       await s.set(key, JSON.stringify(day));
       if (group === 'fv') days.push(day);
       // Für den Überblick: nur die Fahrten dieses Feeds, je eine Zahl
@@ -104,7 +120,10 @@ export async function aggregateFor(date: string): Promise<DayAgg | null> {
   const text = await store().get(date, { type: 'text' });
   if (!text) return null;
   const model = buildDayModel(tt, date);
-  return aggregateDay(model, observedResult(model, JSON.parse(text) as RealtimeDay).result);
+  const day = JSON.parse(text) as RealtimeDay;
+  const ids = new Set(tt.trips.map((t) => t.id));
+  renameTrips(day.trips, (await fvAlias()).dates[date], (id) => ids.has(id));
+  return aggregateDay(model, observedResult(model, day).result);
 }
 
 /** Abgeschlossene Tage verdichten und speichern (idempotent). */

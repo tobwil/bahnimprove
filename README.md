@@ -42,6 +42,8 @@ Rund 43.000 Regionalfahrten am Tag sind zu viel für ein Handy. Ein nächtlicher
 
 Damit die Deutschlandkarte schon beim Start voll ist, legt derselbe Job je Stunde einen **Überblick** ab: alle Regionalfahrten, die um diese Zeit unterwegs sind (± 1 Stunde), nur mit Halten und Zeiten (etwa 200 KB komprimiert zur Hauptverkehrszeit). `collect-realtime` schreibt dazu alle 2 Minuten eine Verspätung je Regionalfahrt. Die App zeichnet daraus alle Regionalzüge als Punkte (`GET /api/rv-ueberblick?date=&h=` und `GET /api/rv-jetzt?date=`), bis beim Heranzoomen die Kacheln mit allen Details übernehmen.
 
+**Neue trip_ids:** gtfs.de vergibt bei neuen Fahrplanständen Fahrt-IDs und Haltnummern teils komplett neu, die Echtzeit ist aber unter den alten gespeichert. Der Fahrplan-Job ordnet deshalb vor dem Wechsel jede Fahrt mit gesammelter Echtzeit (gestern und heute) ihrer Entsprechung im neuen Fahrplan zu (Linie, Start, Abfahrt, Ziel am selben Tag; Haltnummern über die Bahnhöfe) und legt das als `fv-alias` ab. `collect-realtime` schreibt die Tagesdateien damit um, die Tagesverdichtung wendet die Zuordnung ebenfalls an. So bleiben Live-Karte, Tagesstatistik, Lessons learned und Open Data vollständig, auch wenn der Job tagsüber neu läuft.
+
 ### Verspätungsgründe
 
 `collect-reasons` fragt alle 10 Minuten die IRIS-Schnittstelle der DB für rund 70 große Bahnhöfe ab (`public/data/iris-stations.json`, erzeugt mit `scripts/build-iris-stations.ts`). Die Funktion zählt die gemeldeten Grundcodes, etwa „Verspätung aus vorheriger Fahrt“ oder „Reparatur an der Strecke“. Die Lessons learned zeigen sie je Bahnhof und gruppiert nach Hebel: Infrastruktur, Betriebsablauf, Fahrzeuge, äußere Einflüsse.
