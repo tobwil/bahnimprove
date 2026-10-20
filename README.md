@@ -40,6 +40,8 @@ Ein Befund ist **belastbar** ab 40 Fällen aus mindestens 7 Tagen, und nur wenn 
 
 Rund 43.000 Regionalfahrten am Tag sind zu viel für ein Handy. Ein nächtlicher Job (`build-static-background`, ausgelöst von `refresh-static`) bereitet deshalb Fern- und Regionalverkehr aus gtfs.de auf. Der Regionalverkehr landet in Kacheln von 0,5° × 0,75°, also etwa 55 × 52 km, in Netlify Blobs. Die App lädt nur die Kacheln, die sie braucht: den sichtbaren Ausschnitt (ab Zoom 2,2), den eigenen Standort, einen Bahnhof sowie Start und Ziel einer Reise. `GET /api/rv?date=&tile=` liefert eine Kachel samt Echtzeitdaten. Die Verbindungssuche verknüpft Regionalzüge rund um Start und Ziel mit dem bundesweiten Fernverkehr.
 
+Damit die Deutschlandkarte schon beim Start voll ist, legt derselbe Job je Stunde einen **Überblick** ab: alle Regionalfahrten, die um diese Zeit unterwegs sind (± 1 Stunde), nur mit Halten und Zeiten (etwa 200 KB komprimiert zur Hauptverkehrszeit). `collect-realtime` schreibt dazu alle 2 Minuten eine Verspätung je Regionalfahrt. Die App zeichnet daraus alle Regionalzüge als Punkte (`GET /api/rv-ueberblick?date=&h=` und `GET /api/rv-jetzt?date=`), bis beim Heranzoomen die Kacheln mit allen Details übernehmen.
+
 ### Verspätungsgründe
 
 `collect-reasons` fragt alle 10 Minuten die IRIS-Schnittstelle der DB für rund 70 große Bahnhöfe ab (`public/data/iris-stations.json`, erzeugt mit `scripts/build-iris-stations.ts`). Die Funktion zählt die gemeldeten Grundcodes, etwa „Verspätung aus vorheriger Fahrt“ oder „Reparatur an der Strecke“. Die Lessons learned zeigen sie je Bahnhof und gruppiert nach Hebel: Infrastruktur, Betriebsablauf, Fahrzeuge, äußere Einflüsse.

@@ -13,6 +13,7 @@ import { ArrivalIndex, activeIncidents as simIncidents, hotspotsAt, hourlyPunctu
 import { buildDayModel, type DayModel } from './sim/model.ts';
 import { observedResult, type ObservedStats } from './sim/real.ts';
 import { RegionalLayer } from './regional/layer.ts';
+import { OverviewLayer } from './regional/overview.ts';
 import { tileKey, tilesAround, tilesInBounds } from './data/regional.ts';
 import type { RealtimeDay } from './realtime/types.ts';
 import { causeText, fmtDelay, hhmm, shortName, tripLabel } from './sim/text.ts';
@@ -50,6 +51,8 @@ interface Day {
   report?: DailyReport;
   /** Regionalzüge dieses Verkehrstags (Kacheln nach Bedarf) */
   regional: RegionalLayer;
+  /** Alle Regionalzüge als Punkte für die Deutschlandkarte */
+  overview: OverviewLayer;
 }
 
 /** Echtzeitdaten: in Produktion von der Netlify Function, lokal von scripts/collect-realtime.ts. */
@@ -125,7 +128,7 @@ async function main() {
       const model = buildDayModel(tt, date);
       const result = simulate(model, defaultPolicy());
       const regional = new RegionalLayer(tt.stations, date, tt.version);
-      d = { date, model, result, arrivals: new ArrivalIndex(model, result), bins: hourlyPunctuality(model, result), mode: 'sim', regional };
+      d = { date, model, result, arrivals: new ArrivalIndex(model, result), bins: hourlyPunctuality(model, result), mode: 'sim', regional, overview: new OverviewLayer(tt.stations, date, tt.version) };
       const day = d;
       regional.onChange = () => {
         if (state.day === day) renderPanels(netTrains());
@@ -1377,7 +1380,13 @@ async function main() {
       }
     }
     const maxHot = Math.max(30, ...state.hotspots.map((h) => h.minutes));
+    // Überblick: Regionalzüge, deren Kachel nicht geladen ist (Verspätungen nur live bekannt)
+    d.overview.update(state.time, state.live);
+    const ambient = d.overview.points(state.time, state.live, (id, s, delay) =>
+      !d.regional.has(id) && (s ? prefs.show.s : prefs.show.rv) && (!prefs.show.late || (delay ?? 0) >= 6),
+    );
     map.draw({
+      ambient,
       trains: trains.filter((t) => visibleOnMap(t, n.model, n.fvCount)),
       incidents: activeIncidents(d.model, state.time),
       fvCount: n.fvCount,

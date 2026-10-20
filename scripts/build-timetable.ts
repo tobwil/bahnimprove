@@ -39,6 +39,10 @@ async function main() {
       mkdirSync(`public/data/rv/${key.split('/')[0]}`, { recursive: true });
       writeFileSync(`public/data/rv/${key}.json`, JSON.stringify(tile));
     }
+    for (const [key, chunk] of build.regional.overview) {
+      mkdirSync(`public/data/rv/ov/${key.split('/')[0]}`, { recursive: true });
+      writeFileSync(`public/data/rv/ov/${key}.json`, JSON.stringify(chunk));
+    }
     writeFileSync('public/data/rv/index.json', JSON.stringify(build.regional.index));
     writeFileSync('public/data/rv/trip-tiles.json', JSON.stringify(build.regional.tripTiles));
     const perDay = build.regional.index.dates.map((d, i) => `${d}:${Object.values(build.regional!.index.tiles).reduce((s, c) => s + c[i], 0)}`);

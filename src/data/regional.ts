@@ -41,6 +41,40 @@ export interface RegionalTile {
   trips: RegionalTrip[];
 }
 
+/**
+ * Überblick für ganz Deutschland: alle Regionalfahrten, die um eine Stunde herum unterwegs sind
+ * (eine Stunde davor bis eine danach, damit auch verspätete Züge dabei sind), nur mit den Halten
+ * dieses Zeitraums. Reicht, um sie im Überblick als Punkte zu zeigen, ohne alle Kacheln zu laden.
+ */
+export interface OverviewChunk {
+  version: string;
+  date: string;
+  hour: number;
+  /** [trip_id, 1 = S-Bahn, Bahnhöfe, Zeiten (Ankunft, Abfahrt je Halt, Minuten im Verkehrstag)] */
+  trips: [string, 0 | 1, number[], number[]][];
+}
+
+/** Aktuelle Verspätung je Regionalfahrt aus dem letzten Feed (für den Überblick) */
+export interface OverviewDelays {
+  date: string;
+  feedTime: number;
+  /** trip_id → Minuten */
+  d: Record<string, number>;
+  /** ausgefallene Fahrten */
+  x: string[];
+}
+
+/** Halte einer Fahrt, die ins Fenster [from, to] fallen – plus je einer davor und danach */
+export function overviewSlice(times: number[], from: number, to: number): [number, number] | null {
+  const n = times.length / 2;
+  if (times[1] > to || times[(n - 1) * 2] < from) return null;
+  let lo = 0;
+  while (lo + 1 < n && times[(lo + 1) * 2 + 1] <= from) lo++;
+  let hi = n - 1;
+  while (hi - 1 > lo && times[(hi - 1) * 2] >= to) hi--;
+  return [lo, hi];
+}
+
 export interface RegionalIndex {
   version: string;
   dates: string[];

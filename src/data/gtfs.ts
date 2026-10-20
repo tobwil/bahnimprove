@@ -5,9 +5,10 @@
  * Läuft lokal (scripts/build-timetable.ts) und nachts auf dem Server (Netlify Function).
  */
 import { strFromU8, unzipSync } from 'fflate';
+import { categoryOf } from '../sim/model.ts';
 import { lineKey } from '../sim/search.ts';
 import type { Timetable, TimetableStation, TimetableTrip } from '../sim/types.ts';
-import { tileKey, type RegionalIndex, type RegionalTile, type RegionalTrip } from './regional.ts';
+import { overviewSlice, tileKey, type OverviewChunk, type RegionalIndex, type RegionalTile, type RegionalTrip } from './regional.ts';
 
 export const FV_URL = 'https://download.gtfs.de/germany/fv_free/latest.zip';
 export const RV_URL = 'https://download.gtfs.de/germany/rv_free/latest.zip';
@@ -194,6 +195,8 @@ export interface StaticBuild {
     tiles: Map<string, RegionalTile>;
     /** trip_id → Kacheln (für das Zuschneiden der Echtzeitdaten) */
     tripTiles: Record<string, string[]>;
+    /** Überblick je Stunde, Schlüssel "YYYYMMDD/HH" */
+    overview: Map<string, OverviewChunk>;
   };
 }
 
@@ -273,6 +276,7 @@ export function buildStatic(fv: Feed, rv: Feed | null, opts: { start: string; fv
     const tripTiles: Record<string, string[]> = {};
     const counts: Record<string, number[]> = {};
     const lines: Record<string, Set<string>> = {};
+    const overview = new Map<string, OverviewChunk>();
     for (const [tripId, trip] of rvData.trips) {
       const list = rvData.stopTimes.get(tripId);
       if (!list || list.length < 2) continue;
@@ -302,11 +306,22 @@ export function buildStatic(fv: Feed, rv: Feed | null, opts: { start: string; fv
           tile.trips.push({ ...base, op });
           (counts[key] ??= rvDates.map(() => 0))[di]++;
         }
+        // Überblick: jede Stunde, in deren Fenster (± 1 h) die Fahrt unterwegs ist
+        const isS = categoryOf(base.line.replace(/^(S)(\d)/, '$1 $2')) === 'S' ? 1 : 0;
+        const t = base.times;
+        for (let h = Math.max(0, Math.ceil((t[1] - 60) / 60)); h * 60 - 60 <= t[t.length - 2]; h++) {
+          const cut = overviewSlice(t, h * 60 - 60, h * 60 + 60);
+          if (!cut) continue;
+          const k = `${date}/${String(h).padStart(2, '0')}`;
+          let chunk = overview.get(k);
+          if (!chunk) overview.set(k, (chunk = { version, date, hour: h, trips: [] }));
+          chunk.trips.push([tripId, isS, s.slice(cut[0], cut[1] + 1), t.slice(cut[0] * 2, (cut[1] + 1) * 2)]);
+        }
       });
     }
     rvData.stopTimes.clear();
     const lineTiles = Object.fromEntries(Object.entries(lines).map(([k, v]) => [k, [...v]]));
-    regional = { index: { version, dates: rvDates, tiles: counts, lines: lineTiles }, tiles, tripTiles };
+    regional = { index: { version, dates: rvDates, tiles: counts, lines: lineTiles }, tiles, tripTiles, overview };
   }
 
   // w = Zughalte pro Tag (alle Züge); bedient ist bedient, auch mit einem Halt pro Woche

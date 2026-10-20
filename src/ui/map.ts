@@ -123,6 +123,8 @@ export interface Frame {
   user?: { lon: number; lat: number };
   /** Fahrten mit id ≥ fvCount sind Regionalzüge (kleiner gezeichnet) */
   fvCount?: number;
+  /** Überblick: weitere Regionalzüge als [lon, lat, Verspätung (−1 = unbekannt)]-Tripel, nur als Punkt */
+  ambient?: number[];
 }
 
 export type LabelMode = 'few' | 'many' | 'off';
@@ -531,6 +533,16 @@ export class PixelMap {
         this.sprite(buf, inc.blocking ? 'block' : 'warn', rx, ry - 3);
         this.sprite(glow, inc.blocking ? 'block' : 'warn', rx, ry - 3);
       }
+    }
+
+    // Überblick: Regionalzüge, deren Kachel (noch) nicht geladen ist – ein Pixel, wie ein Regionalzug von weitem
+    const amb = f.ambient ?? [];
+    for (let k = 0; k < amb.length; k += 3) {
+      const [x, y] = this.project(amb[k], amb[k + 1]);
+      if (x < 0 || y < 0 || x >= this.w || y >= this.h) continue;
+      const d = amb[k + 2];
+      const col = d < 0 ? (focus ? TRAIN_UNKNOWN_DIM : TRAIN_UNKNOWN) : (focus ? TRAIN_DIM : TRAIN_PX).find((c) => d < c.max)!;
+      this.set(buf, x, y, col.head);
     }
 
     const sorted = [...f.trains].sort((a, b) => Number(a.known) - Number(b.known) || a.delay - b.delay);

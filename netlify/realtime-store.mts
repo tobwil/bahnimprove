@@ -2,10 +2,10 @@ import { getStore } from '@netlify/blobs';
 import bundledTimetable from '../public/data/timetable.json' with { type: 'json' };
 import irisStations from '../public/data/iris-stations.json' with { type: 'json' };
 import { addMessages, mergeReasons, parseIrisMessages, type ReasonDay } from '../src/insights/reasons.ts';
-import type { RegionalIndex, RegionalTile } from '../src/data/regional.ts';
+import type { OverviewChunk, OverviewDelays, RegionalIndex, RegionalTile } from '../src/data/regional.ts';
 import { aggregateDay, findings, mergeDays, type DayAgg, type Insights } from '../src/insights/aggregate.ts';
 import { extractGroups, fetchFeed } from '../src/realtime/feed.ts';
-import { mergeDay, type RealtimeDay } from '../src/realtime/types.ts';
+import { currentDelays, mergeDay, type RealtimeDay } from '../src/realtime/types.ts';
 import { buildDayModel, categoryOf, type DayModel } from '../src/sim/model.ts';
 import { berlinMidnightEpoch, observeTrip, observedResult } from '../src/sim/real.ts';
 import type { Timetable, TimetableStation, Trip, TripResult } from '../src/sim/types.ts';
@@ -61,6 +61,8 @@ export async function collect(): Promise<RealtimeDay[]> {
       const day = mergeDay(prevText ? (JSON.parse(prevText) as RealtimeDay) : null, date, feedTime, trips);
       await s.set(key, JSON.stringify(day));
       if (group === 'fv') days.push(day);
+      // Für den Überblick: nur die Fahrten dieses Feeds, je eine Zahl
+      else await s.setJSON(`rv-jetzt/${date}`, { date, feedTime, ...currentDelays(trips) } satisfies OverviewDelays);
     }
   }
   return days;
@@ -81,6 +83,18 @@ export async function regionalTile(date: string, tile: string): Promise<(Regiona
   const day = rvDayCache?.day;
   const rt: RealtimeDay | null = day ? { date, feedTime: day.feedTime, trips: Object.fromEntries(base.trips.filter((t) => day.trips[t.id]).map((t) => [t.id, day.trips[t.id]])) } : null;
   return { ...base, rt };
+}
+
+/** Überblick einer Stunde (alle Regionalfahrten um diese Zeit) aus dem nächtlichen Job */
+export async function overviewChunk(date: string, hour: number): Promise<{ version: string; chunk: OverviewChunk | null } | null> {
+  const index = (await staticStore().get('rv-index', { type: 'json' })) as RegionalIndex | null;
+  if (!index) return null;
+  const chunk = (await tileStore().get(`${index.version}/ov/${date}/${String(hour).padStart(2, '0')}`, { type: 'json' })) as OverviewChunk | null;
+  return { version: index.version, chunk };
+}
+
+export async function overviewDelays(date: string): Promise<OverviewDelays | null> {
+  return (await store().get(`rv-jetzt/${date}`, { type: 'json' })) as OverviewDelays | null;
 }
 
 /** Tagesverdichtung aus den gesammelten Echtzeitdaten (nur möglich, solange der Fahrplan den Tag kennt). */

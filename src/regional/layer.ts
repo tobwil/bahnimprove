@@ -43,6 +43,11 @@ export class RegionalLayer {
     private version: string | undefined,
   ) {}
 
+  /** Ist diese Fahrt schon aus einer Kachel geladen? */
+  has(gtfsId: string): boolean {
+    return this.byGtfs.has(gtfsId);
+  }
+
   get loadedTiles() {
     return this.tiles.size;
   }
