@@ -1,6 +1,9 @@
 import type { Context } from '@netlify/functions';
+import { tripAlias } from '../../src/data/alias.ts';
 import { FV_URL, RV_URL, addDays, berlinToday, buildStatic, unzipFeed } from '../../src/data/gtfs.ts';
-import { staticStore, tileStore } from '../realtime-store.mts';
+import type { Timetable } from '../../src/sim/types.ts';
+import { staticStore, store, tileStore } from '../realtime-store.mts';
+import type { RealtimeDay } from '../../src/realtime/types.ts';
 
 /**
  * Nächtlicher Fahrplan-Job (Hintergrund, bis 15 Min): lädt die GTFS-Feeds von gtfs.de und legt
@@ -33,11 +36,28 @@ export default async (req: Request, _context: Context) => {
     // Erst wenn alle Kacheln liegen, zeigen Index und Fahrplan auf die neue Version
     await st.set('rv-trip-tiles', JSON.stringify({ version, map: build.regional!.tripTiles }));
     await st.set('rv-index', JSON.stringify(build.regional!.index));
+    // Neue trip_ids? Gesammelte Echtzeit von gestern und heute der neuen Version zuordnen,
+    // bevor der neue Fahrplan gilt (collect-realtime schreibt die Tagesdateien dann um)
+    const oldTt = (await st.get('timetable', { type: 'json' })) as Timetable | null;
+    let aliasCount = 0;
+    if (oldTt) {
+      const today = berlinToday();
+      const dates = [addDays(today, -1), today];
+      const collected = new Map<string, Set<string>>();
+      for (const d of dates) {
+        const day = (await store().get(d, { type: 'json' })) as RealtimeDay | null;
+        if (day) collected.set(d, new Set(Object.keys(day.trips)));
+      }
+      // collect-realtime schreibt die Tagesdateien binnen Minuten um; ältere Zuordnungen braucht es danach nicht mehr
+      const alias = tripAlias(oldTt, build.timetable, dates, (d) => collected.get(d) ?? new Set());
+      aliasCount = Object.values(alias.dates).reduce((n, m) => n + Object.keys(m).length, 0);
+      await st.setJSON('fv-alias', alias);
+    }
     await st.set('timetable', JSON.stringify(build.timetable));
     // Alte Kachel-Versionen aufräumen
     const old = (await tiles.list()).blobs.filter((b) => !b.key.startsWith(`${version}/`));
     for (let i = 0; i < old.length; i += 50) await Promise.all(old.slice(i, i + 50).map((b) => tiles.delete(b.key)));
-    await status('done', { version, fvTrips: build.timetable.trips.length, tiles: entries.length, deleted: old.length });
+    await status('done', { version, fvTrips: build.timetable.trips.length, tiles: entries.length, deleted: old.length, alias: aliasCount });
   } catch (e) {
     await status('error', { message: String(e), stack: e instanceof Error ? e.stack : undefined });
     throw e;
