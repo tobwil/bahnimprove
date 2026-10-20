@@ -43,6 +43,10 @@ describe('GTFS-Aufbereitung', () => {
     expect(b.regional!.tripTiles.R1.length).toBeGreaterThanOrEqual(1);
     // Linienindex: Suche nach "RE 29" findet die Kachel, in der die Fahrt beginnt
     expect(b.regional!.index.lines).toEqual({ re29: [tileKey(50.26, 10.96)] });
+    // Überblick: Fahrt 09:00–09:41 steckt in den Stunden 8, 9 und 10 (jeweils ± 1 h)
+    expect([...b.regional!.overview.keys()].filter((k) => k.startsWith('20261019/')).sort()).toEqual(['20261019/08', '20261019/09', '20261019/10']);
+    const [id, isS, stops, times] = b.regional!.overview.get('20261019/09')!.trips[0];
+    expect([id, isS, stops, times]).toEqual(['R1', 0, [names.indexOf('Coburg'), bamberg], [540, 540, 580, 581]]);
     expect(b.timetable.stations[names.indexOf('Coburg')].w).toBeGreaterThan(0);
     expect(b.timetable.stations[names.indexOf('Coburg')].weight).toBe(0);
   });

@@ -25,7 +25,7 @@ export default async (req: Request, _context: Context) => {
     const version = new Date().toISOString();
     const build = buildStatic(unzipFeed(fv), unzipFeed(rv), { start: addDays(berlinToday(), -1), fvDays: 15, rvDays: 4, version });
     const tiles = tileStore();
-    const entries = [...build.regional!.tiles.entries()];
+    const entries = [...build.regional!.tiles.entries(), ...[...build.regional!.overview.entries()].map(([k, c]) => [`ov/${k}`, c] as const)];
     await status('upload', { tiles: entries.length });
     for (let i = 0; i < entries.length; i += 20) {
       await Promise.all(entries.slice(i, i + 20).map(([key, tile]) => tiles.set(`${version}/${key}`, JSON.stringify(tile))));

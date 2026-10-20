@@ -17,6 +17,24 @@ export interface RealtimeTrip {
   u: StopUpdate[];
 }
 
+/**
+ * Eine Verspätung je Fahrt für den Überblick: die erste Meldung des Feeds (der nächste Halt –
+ * vergangene Halte meldet der Feed nicht mehr), Ankunft vor Abfahrt.
+ */
+export function currentDelays(trips: Record<string, RealtimeTrip>): { d: Record<string, number>; x: string[] } {
+  const d: Record<string, number> = {};
+  const x: string[] = [];
+  for (const [id, t] of Object.entries(trips)) {
+    if (t.canceled) {
+      x.push(id);
+      continue;
+    }
+    const first = [...t.u].sort((a, b) => a[0] - b[0]).find((u) => !u[3] && (u[1] ?? u[2]) !== null);
+    if (first) d[id] = Math.round(first[1] ?? first[2]!);
+  }
+  return { d, x };
+}
+
 /** Arbeitet neue Meldungen in einen Tag ein: neuere Werte je Halt gewinnen, ältere Halte bleiben erhalten. */
 export function mergeDay(day: RealtimeDay | null, date: string, feedTime: number, trips: Record<string, RealtimeTrip>): RealtimeDay {
   const out: RealtimeDay = day && day.date === date ? { ...day, trips: { ...day.trips } } : { date, feedTime: 0, trips: {} };
