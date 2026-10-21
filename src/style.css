@@ -1125,6 +1125,14 @@ button {
   margin-top: 10px;
 }
 
+.intro {
+  margin: 24px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted);
+  max-width: 60ch;
+}
+
 .credits {
   margin: 20px 0 0;
   font-size: 11px;
