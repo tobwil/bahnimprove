@@ -16,6 +16,7 @@ let shellCache: { html: string; source: string } | null = null;
 const fallbackShell = (url: URL) => `<!doctype html><html lang="de"><head><meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Share my Train</title>
+    <meta name="robots" content="noindex" />
     <meta name="description" content="" />
     <script>location.replace('/?folge=' + encodeURIComponent(${JSON.stringify(url.pathname + url.search)}));</script>
   </head><body style="background:#070a14;color:#e9eefc;font-family:system-ui"><p><a href="/" style="color:#ffc56b">Share my Train öffnen</a></p></body></html>`;
@@ -86,10 +87,12 @@ export default async (req: Request) => {
     <meta property="og:image" content="${esc(img.toString())}" />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="632" />
-    <meta name="twitter:card" content="summary_large_image" />`;
+    <meta name="twitter:card" content="summary_large_image" />
+    <!-- Private Fahrten (mit Namen) gehören nicht in Suchmaschinen -->
+    <meta name="robots" content="noindex" />`;
   const out = html
     .replace(/<title>[^<]*<\/title>/, `<title>${esc(title)}</title>`)
-    .replace(/<meta property="og:[^>]*>\s*/g, '')
+    .replace(/<meta (property="og:|name="twitter:)[^>]*>\s*/g, '')
     .replace(/<meta name="description"[^>]*>/, `<meta name="description" content="${esc(description)}" />\n    ${meta}`);
   return new Response(out, {
     headers: {
@@ -98,6 +101,7 @@ export default async (req: Request) => {
       // Notfall-Seite nicht im CDN festhalten
       'Netlify-CDN-Cache-Control': source === 'fallback' ? 'no-store' : 'public, s-maxage=60',
       'X-Shell-Source': source,
+      'X-Robots-Tag': 'noindex',
     },
   });
 };

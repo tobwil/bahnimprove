@@ -6,12 +6,46 @@
     <base href="/" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="theme-color" content="#070a14" />
-    <title>Share my Train</title>
-    <meta name="description" content="Share my Train: Alle Züge in Deutschland live auf einer Pixelkarte. Teile deine Zugfahrt mit deinen Liebsten, sieh Abfahrten mit Prognose und offene Lessons learned für die Bahn." />
-    <meta property="og:title" content="Share my Train" />
+    <title>Share my Train – Zugverspätungen live auf der Karte</title>
+    <meta name="description" content="Alle Fern- und Regionalzüge in Deutschland live auf einer Karte – mit echten Verspätungen, Abfahrten mit Prognose für jeden Bahnhof und deiner Zugfahrt zum Teilen. Kostenlos, ohne Anmeldung." />
+    <meta property="og:title" content="Share my Train – Zugverspätungen live auf der Karte" />
     <meta property="og:site_name" content="Share my Train" />
     <meta property="og:description" content="Teile deine Zugfahrt live, sieh alle Züge auf der Karte und wann sie wirklich ankommen – aus echten Echtzeitdaten." />
     <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://sharemytrain.de/" />
+    <meta property="og:image" content="https://sharemytrain.de/og.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:locale" content="de_DE" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <!-- Eine Adresse für Google (auch über train.kisruptiv.de); geteilte Zugfahrten (/zug/…) bekommen keine -->
+    <script>
+      (() => {
+        const titles = { '/bericht': 'Was die DB lernen kann – Lessons learned | Share my Train', '/impressum': 'Impressum | Share my Train', '/datenschutz': 'Datenschutz | Share my Train' };
+        const path = location.pathname.replace(/\/+$/, '') || '/';
+        if (path.startsWith('/zug/')) return;
+        const l = document.createElement('link');
+        l.rel = 'canonical';
+        l.href = 'https://sharemytrain.de' + (titles[path] ? path : '/');
+        document.head.appendChild(l);
+        if (titles[path]) document.title = titles[path];
+      })();
+    </script>
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "WebApplication",
+        "name": "Share my Train",
+        "url": "https://sharemytrain.de/",
+        "description": "Alle Fern- und Regionalzüge in Deutschland live auf einer Karte – mit echten Verspätungen, Abfahrten mit Prognose und deiner Zugfahrt zum Teilen.",
+        "applicationCategory": "TravelApplication",
+        "operatingSystem": "Web",
+        "inLanguage": "de",
+        "isAccessibleForFree": true,
+        "offers": { "@type": "Offer", "price": "0", "priceCurrency": "EUR" },
+        "publisher": { "@type": "Organization", "name": "Wilhelm & Zeitlmann GbR – KIsruptiv", "url": "https://sharemytrain.de/impressum" }
+      }
+    </script>
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 8 8' shape-rendering='crispEdges'%3E%3Crect width='8' height='8' fill='%23070a14'/%3E%3Crect x='1' y='2' width='6' height='3' fill='%23ffc56b'/%3E%3Crect x='2' y='3' width='1' height='1' fill='%23070a14'/%3E%3Crect x='5' y='3' width='1' height='1' fill='%23070a14'/%3E%3Crect x='1' y='6' width='6' height='1' fill='%238ab4ff'/%3E%3C/svg%3E" />
     <!-- Nutzungsstatistik ohne Cookies (Umami): ohne Suchparameter (Namen aus geteilten Links) und ohne Zugkennung (/zug/TAG/ZUG → /zug) -->
     <script>
@@ -20,6 +54,7 @@
     <script defer src="https://cloud.umami.is/script.js" data-website-id="160fa4cc-8e0a-44c6-bbc5-c41c526457d6" data-domains="sharemytrain.de,train.kisruptiv.de" data-exclude-search="true" data-do-not-track="true" data-before-send="smtBeforeSend"></script>
   </head>
   <body>
+    <h1 class="visually-hidden">Share my Train – Zugverspätungen live auf der Karte</h1>
     <div class="app" id="app">
       <section class="stage" aria-label="Karte des Fernverkehrs">
         <canvas id="map"></canvas>
@@ -231,6 +266,7 @@
             <div id="detail"></div>
           </div>
 
+          <p class="intro">Share my Train zeigt alle Fern- und Regionalzüge in Deutschland live auf einer Karte, mit echten Verspätungen aus offenen Echtzeitdaten. Dazu Abfahrten mit Prognose für jeden Bahnhof, die Pünktlichkeit im Netz und die Strecken, auf denen Züge gerade Zeit verlieren. Deine eigene Zugfahrt teilst du per Link mit Familie und Freunden. Kostenlos und ohne Anmeldung.</p>
           <p class="credits">Fahrplan: DELFI e.V. / gtfs.de (CC BY 4.0) · Echtzeit: gtfs.de (CC BY-SA 4.0) · Karte: Natural Earth<br /><a href="/impressum" data-legal="imprint">Impressum</a> · <a href="/datenschutz" data-legal="privacy">Datenschutz</a> · <a href="#" data-legal="about">Über Share my Train</a></p>
         </div>
       </aside>
